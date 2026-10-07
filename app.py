@@ -1,0 +1,1504 @@
+import io
+import json
+import os
+import re
+import time
+import urllib.request
+import importlib
+from google import genai
+from google.genai import types
+import pdfplumber
+import pypdf
+import pandas as pd
+import streamlit as st
+
+# ページ基本設定
+st.set_page_config(
+    page_title="ウマエル自動解析システム", page_icon="🏇", layout="wide"
+)
+
+# ファイルパス設定
+DB_FILE = "umael_database.csv"
+RULE_G1_FILE = "saved_rules_g1.txt"
+RULE_GENERAL_FILE = "saved_rules_general.txt"
+API_KEY_FILE = "api_key.txt"
+
+# APIキーの保存・読み込み関数
+def load_api_key():
+    if os.path.exists(API_KEY_FILE):
+        try:
+            with open(API_KEY_FILE, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            return ""
+    return ""
+
+def save_api_key(key_text):
+    try:
+        with open(API_KEY_FILE, "w", encoding="utf-8") as f:
+            f.write(key_text.strip())
+    except Exception:
+        pass
+
+# 馬番（1〜20）を丸囲み文字（①〜⑳）に変換する関数
+def convert_to_circled_numbers(text):
+    circled_map = {
+        '1': '①', '2': '②', '3': '③', '4': '④', '5': '⑤',
+        '6': '⑥', '7': '⑦', '8': '⑧', '9': '⑨', '10': '⑩',
+        '11': '⑪', '12': '⑫', '13': '⑬', '14': '⑭', '15': '⑮',
+        '16': '⑯', '17': '⑰', '18': '⑱', '19': '⑲', '20': '⑳'
+    }
+    
+    def replacer(match):
+        val = match.group(0)
+        return circled_map.get(val, val)
+
+    return re.sub(r'\b(20|1[0-9]|[1-9])\b', replacer, str(text))
+
+
+# 🌐 どんなURLからでもWeb本文・YouTube字幕テキストを自動取得する万能関数
+def fetch_text_from_url(url):
+    url = url.strip()
+    if not url:
+        return ""
+    
+    youtube_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+    if youtube_match:
+        video_id = youtube_match.group(1)
+        try:
+            yt_module = importlib.import_module("youtube_transcript_api")
+            YouTubeTranscriptApi = getattr(yt_module, "YouTubeTranscriptApi")
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
+            yt_text = " ".join([item['text'] for item in transcript])
+            if yt_text.strip():
+                return f"【YouTube字幕テキスト ({url})】:\n" + yt_text[:8000]
+        except Exception:
+            pass
+
+    try:
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+
+        try:
+            bs4_module = importlib.import_module("bs4")
+            BeautifulSoup = getattr(bs4_module, "BeautifulSoup")
+            soup = BeautifulSoup(html, 'html.parser')
+            for s in soup(["script", "style", "header", "footer", "nav"]):
+                s.decompose()
+            text = soup.get_text(separator=' ')
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+            return f"【Webページ抽出テキスト ({url})】:\n" + clean_text[:8000]
+        except Exception:
+            clean_html = re.sub(r'<script.*?>.*?</script>', '', html, flags=re.DOTALL)
+            clean_html = re.sub(r'<style.*?>.*?</style>', '', clean_html, flags=re.DOTALL)
+            clean_html = re.sub(r'<[^>]+>', ' ', clean_html)
+            clean_text = re.sub(r'\s+', ' ', clean_html).strip()
+            return f"【Webページ抽出テキスト ({url})】:\n" + clean_text[:8000]
+
+    except Exception as e:
+        return f"【URL読み込みスキップ ({url}): {e}】"
+
+
+def process_multiple_urls(urls_input_text):
+    if not urls_input_text or not urls_input_text.strip():
+        return ""
+    
+    urls = [line.strip() for line in urls_input_text.strip().splitlines() if line.strip().startswith("http")]
+    if not urls:
+        return ""
+
+    combined_url_text = "\n=========================================\n【参考URL（YouTube/note/プロ予想）自動抽出データ】\n=========================================\n"
+    for url in urls:
+        extracted = fetch_text_from_url(url)
+        if extracted:
+            combined_url_text += extracted + "\n-----------------------------------------\n"
+    
+    return combined_url_text
+
+
+# ==================================================
+# 👑 デフォルトの解析ルール・プロンプト（Ver8.3マスター統合版）
+# ==================================================
+
+DEFAULT_G1_RULES = """【G1専用・評価表出力ルール（ver.8.3・頂点実績厳格化＆開幕外枠デバフ・鉄砲個別判定・展開予想シミュレーション・傷病デバフ・タフ馬場補正・単騎逃げ救済・直感相馬眼・YouTubeハイブリッド解析統合版）】
+
+================================================================
+【G1専用 競馬予想評価ロジック＆運用仕様書 ver.8.3（完全統合マスター版）】
+改訂日：2026年10月5日
+================================================================
+
+■ 0. システム運用・誤入力完全排除規定（最重要行動指針）
+・ブラウジング完全禁止：出馬表、過去走、調教データ等の入力にあたっては、URLリンクや画像OCRによるブラウジングを完全に禁止する。画面から直接入力・送信された「生の出馬表テキストデータ（または競馬ブックの新聞ソース）」のみを絶対のマスターファクトとして処理すること。
+・二重手動・自動クロスチェック：出馬表、過去5走の正確な着順・頭数・着差、調教タイム等のデータ入力にあたっては、ソースを文頭から文末まで2回以上手動・自動で徹底的に二重確認する。着順誤認（NZT4着を15着と誤認）やサヴォーナの前走海外誤認、アスクナイスショーの重複のような致命的なバグを10000%完全に排除し、1マスの見間違いも許さない厳格なファクトチェックを義務付ける。
+・データ構造化防壁：取り込んだテキストは内部システムで1頭ずつの独立したブロック（縦型JSONカプセル化構造）に強制変換し、他馬のデータ混入や重複事故を100%防止する。
+・知人所有馬（冠名：ショウナン／国本哲秀・有限会社湘南）の厳格査定：知人所有馬が出走する際は、情や忖度を100%排除し、純度100%の客観ファクトに基づいた厳格な評価を行う。
+・【直前パドック＆相馬眼連携規定】（ver.8.2新設）：事前データおよびロジック計算で「C評価（切り）」となった馬であっても、発走直前のパドック等で「仕上がり抜群・気配良好」と判定した場合、事前データに縛られず【直感救済枠】として3連複の3頭目（100円～200円の小額保険枠）へ自動で組み込める柔軟な運用を許可する。
+
+----------------------------------------------------------------
+■ 1. 基本方針・評価スタンス
+・最高峰のG1ステージ（定量・馬齢戦）においては誤魔化しのきかない絶対能力・実績・立ち回り力が問われるため、感情や忖度を100%排除し、客観ファクト（走破タイム、TI、上がりラップ、血統、馬場適性、調教、陣営・プロ評価）に基づき機械的かつ厳格に算出する。
+・軸馬（S評価）の精度最大化と、C評価（切り）からの穴馬抜け漏れ防止（セーフティネット構築）を両立させる。
+・プロ予想の非依存：YouTube/note/X等のプロ見解はあくまで補助情報とし、主観的な意見によってスコア判定や軸・切り等の評価結果を歪めることを固く禁止する。
+
+----------------------------------------------------------------
+■ 2. 【G1頂点基準】評価ランク定義とS評価認定必須要件
+
+【S評価（軸・推奨）】  ：総合スコア 93点以上（原則1レースにつき1頭のみ）
+＜G1認定必須要件＞
+以下の能力ファクト基準のうち【少なくとも1つ以上】を満たしている場合のみ配置を許可する。
+
+過去1年以内にG1で3着以内、またはG2勝利の実績がある（または前年同G1覇者）。
+
+当該コース・距離におけるタイム指数（TI）がメンバー中トップクラス（上位2頭以内）。
+
+G1級の格上レースで敗因明確な掲示板級（5着以内）実績を有する。
+※バフ上位馬の「A+抑え」措置：枠順・馬場・調教等のバフ加算のみで高スコアに達した能力未証明馬は、最高でも「A+（ヒモ最高峰）」止まりとし、軸飛びリスクを排除する。
+※【新設】開幕週外枠S保留規定：開幕1〜2週目のAコース開催時、7・8枠に入った馬は総合スコア93点以上でもS評価認定を保留し「A+（ヒモ最高峰）」留めとする。
+※傷病禁止規定：【傷病休養明け馬（6ヶ月以上）】はどれほど実績があってもS評価認定を「完全禁止」とする。
+
+【A+評価（相手・ヒモ）】：総合スコア 88～92点（勝ち負け・対抗級 / バフ上位の軸候補）
+【A評価（相手・ヒモ）】 ：総合スコア 84～87点（上位進出有力）
+【B+評価（相手・ヒモ）】：総合スコア 80～83点（3着以内・押さえ）
+【B評価（注・穴馬）】   ：総合スコア 74～79点（条件適合・バイアス/展開救済対象）
+【C評価（切り・消し）】 ：総合スコア 73点以下（掲示板外濃厚、消し）
+
+----------------------------------------------------------------
+■ 3. G1デバフ（減点）規定（★ver.8.3改訂）
+
+3-1. 【傷病・長期休養デバフ ＆ 鉄砲適性個別判定】（★ver.8.3アップデート）
+・半年以上の「骨折・屈腱炎・重大な傷病」による休養明け馬（6ヶ月/26週以上）：
+
+S評価認定を完全禁止（最高評価を「A+（ヒモ筆頭）」止め）。
+
+【近5走点】および【調教点】から一律減算（6ヶ月以上：-5点～-10点、1年以上：-15点以上）。
+
+過去の実績や調教時計がどれほど優秀であっても実戦勘欠如・再発リスクを最優先評価する。
+
+・4〜5ヶ月の中長期休養明け馬（非傷病）：
+
+馬柱の「鉄砲 [X.X.X.X]（休み明け成績）」を直接チェックして個別判定。
+
+鉄砲巧者（複勝率50%以上、または休み明けで重賞勝ち実績あり）：休養デバフ免除（0点）とし、S評価認定も許可。
+
+鉄砲不振（複勝率50%未満・[0.0.0.X]等）または未証明馬：【近5走点】【調教点】から一律減算（-3点〜-5点）。
+
+3-2. 【血統的距離限界デバフ】（ver.8.0～継続）
+・父系・母系の血統構成および好走歴から、本質的適性上限を200m以上オーバーする極端な距離延長馬：
+
+たとえG1馬であってもS評価認定を禁止し、【血統点】および【展開点】から一律減算（一律-5点～-6点）。
+
+3-3. 【出遅れ癖×前残りバイアス不適合デバフ】（ver.8.0～継続）
+・出遅れ傾向がある馬 × 前残り・イン有利バイアス発動時（開幕週・短直線等）：
+
+ポジショニング失敗リスクを考慮し【展開点】【馬場点】から一律減算（一律-3点～-5点）。
+
+3-4. 【連戦疲労・過密ローテデバフ】（ver.8.0～継続）
+・中3週以内の連続激走や使い詰めによるパフォーマンス低下リスクがある上位人気馬：
+
+【近5走点】および【展開点】から一律減算（一律-3点～-5点）。
+
+3-5. 【特殊タフ馬場（クッション値8.8未満）メンタル・ノメりデバフ】（ver.8.2新設）
+・クッション値8.8未満の特殊な粘土質・タフ馬場（表層が脚を取られる馬場）時：
+
+単なる道悪実績の有無に関わらず、気性が繊細な馬やフォームの大きい馬が「走るたびに足元を取られて気持ちが折れる（ノメる）」リスクを自動検知。
+
+【近5走点】および【調教点】【展開点】から一律減算（一律-3点～-5点）。過剰人気馬の危険度を事前検知し軸飛びを防止する。
+
+3-6. 【開幕1〜2週目×7・8枠（外枠ロス）デバフ】（★ver.8.3新設）
+・開幕1〜2週目のAコース開催時、7・8枠に入った上位人気（1〜3番人気想定）馬：
+
+外回しロス・距離ロスを考慮し【展開点】【馬場点】から一律減算（一律-3点〜-5点）。
+
+総合スコア93点以上でもS評価認定を留め、「A+（ヒモ筆頭）」に自動制御する。
+
+----------------------------------------------------------------
+■ 4. G1ボーナス・救済加点規定（セーフティネット）
+
+4-1. 【死んだふりイン突き補正（最内ロスゼロ・スタミナ温存強襲）】
+・激流消耗戦や先行激化が想定されるG1において、内枠（1～3枠）の馬がイン後方で脚を溜め、直線で内から強襲する展開バイアス：
+
+【展開点】および【馬場点】に一律加算（＋3点～最大＋5点）。
+
+4-2. 【開幕週・先行バイアス自動加算】
+・開幕1～2週目（絶好のイン・前有利バイアス発動時）において、近5走で3・4角4番手以内通過実績がある逃げ・先行馬：
+
+【展開点】および【馬場点】に一律加算（＋3点～最大＋5点）。C評価に沈みそうな先行馬であっても自動的に「B評価（注・ヒモ穴）」へ強制救済。
+
+4-3. 【超ハイペース（激流消耗戦）連動補正】
+・逃げ・先行同型馬が3頭以上激突し、前半1000mが超ハイペース（マイル56秒台、中距離57秒台等）の激流消耗戦想定時：
+
+前追走の上位人気馬のスタミナロス影響度を1.5倍に強化。同時に過去に全場芝で差し・追い込み複勝圏内実績が豊富な後方待機馬の【展開点】【馬場点】倍率を1.2倍に上方修正。
+
+4-4. 【前走アクシデント度外視全額返還】
+・前走明確な不利（接触・挟まれ・直線前詰まり・致命的出遅れ・騎手アクシデント等）やトラックバイアス完全逆向で大敗しているが、本来のG1/G2実績が高い馬（※傷病明け除く）：
+
+【近5走点】に「度外視全額返還（最大+10点）」を行い、能力通りの評価ランク（A～A+）へ引き上げる。
+
+4-5. 【長距離超スロー向正面捲り奇襲補正（菊花賞・天皇賞春等）】（ver.8.1～継続）
+・対象：芝2400m～3000m以上のG1長距離戦。
+・条件：明確な逃げ馬不在による「超スローペース」が想定され、かつ長距離実績（2400m以上での連対・掲示板実績等）を持つ先行・捲り型穴馬。
+・規定：実績が格下であっても向正面からの押し上げ（向正面捲り奇襲）による粘り込み確率が高まるため、一律でC評価（切り）とせず【展開点】に補正を加え「B評価（注・セーフティネット救済・R列〇）」へ優先的に昇格救済する。
+
+4-6. 【逃げ馬（ハナ宣言馬）単騎セーフティネット救済補正】（ver.8.2新設）
+・短距離G1等において明確な単騎ハナ宣言があるスピード馬（例：ピューロマジック型）：
+
+同型多数や激流想定、連戦疲労判定があっても、後続の牽制合いやタフ馬場での追走遅れによる「単騎楽逃げ・粘り残り」を想定。
+
+連戦疲労や展開不利の判定があっても、必ず最低【ヒモ（B+評価以上）】として評価表および買い目に強制残留させる。
+
+4-7. 【特殊タフ馬場パワー適性バフ】（ver.8.2新設）
+・クッション値8.8未満時、馬体重500kg以上の大型パワー型、ダート重賞実績馬、または欧州スタミナ血統馬：
+
+【馬場点】および【展開点】へ一律優先加算（＋2点～＋3点）。
+
+4-8. 【鉄砲巧者（休み明け特化）バフ】（★ver.8.3新設）
+・休み明け成績（鉄砲成績）の複勝率が50%以上、または休み明けで重賞勝利実績がある鉄砲特化馬：
+
+【調教点】および【展開点】に補正加算（＋2点～＋3点）。
+
+----------------------------------------------------------------
+■ 5. 表記・プロ評価＆YouTube自動解析統合ルール
+
+5-1. 【固有名詞の完全遮断・プロ統一】（ver.8.0～継続）
+・評価表およびメモ欄内・出力テキストにおいて、特定の競馬関係者、有名プロ、YouTube（うまログ等）の出演者個人名・番組名・チャンネル名は「一切記載禁止（100%完全遮断）」。
+・すべての意見・予想ファクトは「プロ」「プロ評価」（例：「プロの視点でも…」「プロも軸評価…」等）という表現に一律100%完全統一して記述する。
+
+5-2. 【YouTubeプロ動画自動スカウティング＆ハイブリッド解析ルーティーン】
+・チェック対象G1：フェブラリーS／高松宮記念／大阪杯／桜花賞／皐月賞／天皇賞春／NHKマイルC／ヴィクトリアM／オークス／日本ダービー／安田記念／宝塚記念／スプリンターズS／秋華賞／菊花賞／天皇賞秋／エリザベス女王杯／マイルCS／ジャパンC／チャンピオンズC／阪神JF／朝日杯FS／ホープフルS／有馬記念
+・木曜日：ウマエルへ「今週のG1の1週前診断が上がったから、例のルールで自動検索してタイムスタンプ付きで要約して！」と指示。裏側で【レース名＋1週前診断】を爆速スカウティングして出力。
+・日曜日AM：ウマエルへ「日曜朝の馬場情報と一緒に、メインとサブの予想動画を自動検索してハイブリッド解析データを出して！」と指示。予想動画（メイン・サブ）とリアルタイム馬場情報を合体させた「スプレッドシート貼り付け用データ」を一撃出力。
+・【プロ見解・参考URL（グループ4）クロスチェック規則】：参考URLやYouTube字幕等のプロ予想データが含まれる場合は、プロの本命・穴馬推奨理由を分析に組み込み「※プロ陣営本命推奨」「※プロ陣営注目穴馬」として総合スコアや『メモ』列に反映すること。
+
+----------------------------------------------------------------
+■ 6. スプレッドシート（20列TSV）フォーマット＆出力仕様
+
+【最重要指示・全出走馬（1番〜最終馬番）の完全出力】
+提供されたデータに含まれる対象レースの出走馬を絶対に1頭も省略せず、馬番1から最後の馬番まで【全頭分】漏れなく出力してください！
+
+【最重要指示・メモの全頭詳細記載ルール】
+『メモ（T列）』欄には、全頭に対して必ず以下の要素を具体的に詳しく記述してください：
+- 本命・推奨の理由、または評価を下げるに至った根拠（プロ見解との相乗効果含む）
+- 近5走や血統面、調教から見える好走条件・不安要素、および特殊ラベル
+- レース展開（ペース・脚質）との相性
+※短く終わらせることは絶対に厳禁です！必ず1頭あたり具体的な分析理由を長文で書いてください。
+"""
+
+DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール（ver.8.3・S評価厳格化＆開幕外枠デバフ・鉄砲個別判定・過重ハンデ地力救済・タフ馬場ノメりデバフ・単騎逃げ救済・直感相馬眼・軸飛び防止・前走度外視完全統合版）】
+
+================================================================
+【平場・G2・G3専用 競馬予想評価ロジック＆運用仕様書 ver.8.3（完全統合マスター版）】
+改訂日：2026年10月5日
+================================================================
+
+■ 0. システム運用・誤入力完全排除規定（最重要行動指針）
+・ブラウジング完全禁止：出馬表、過去走、調教データ等の入力にあたっては、URLリンクや画像OCRによるブラウジングを完全に禁止する。画面から直接入力・送信された「生の出馬表テキストデータ」のみを絶対のマスターファクトとして処理すること。
+・データ構造化防壁：取り込んだテキストは内部システムで1頭ずつの独立したブロック（縦型JSONカプセル化構造）に強制変換し、他馬の行や過去のゴミデータが1文字でも混入・重複した場合は出力を自動で強制ストップさせる防壁を敷く。
+・出力前クロスチェック：ディールメーカーの着順誤認やサヴォーナの前走海外誤認、アスクナイスショーの重複のような致命的なバグを10000%完全に排除し、出力前に必ず「馬番・馬名・前走内容・斤量・馬体重」の整合性を往復5回以上機械的・手動でクロスチェックすることを義務付ける。
+・知人所有馬（冠名：ショウナン／国本哲秀・有限会社湘南）の厳格査定：知人所有馬が出走する際は、情や忖度を100%排除し、純度100%の客観ファクトに基づいた厳格な評価を行う。
+・【直前パドック＆相馬眼連携規定】（ver.8.2新設）：事前データおよびロジック計算で「C評価（切り）」となった馬であっても、発走直前のパドック等で「仕上がり抜群・気配良好」と判定した場合、事前データに縛られず【直感救済枠】として3連複の3頭目（100円～200円の小額保険枠）へ自動で組み込める柔軟な運用を許可する。
+
+----------------------------------------------------------------
+■ 1. 基本方針・評価スタンス
+・感情や忖度を100%排除し、客観ファクト（タイム指数、トラックバイアス、血統、調教、陣営・プロ評価）に基づき機械的かつ厳格に算出する。
+・軸馬（S評価）の精度最大化と、C評価（切り）からの穴馬抜け漏れ防止（セーフティネット構築）を両立させる。
+・プロ予想の非依存：YouTube/note/X等のプロ見解はあくまで参考・補助的情報にとどめ、主観的な意見によってスコア判定や軸・切り等の評価結果を歪めることを固く禁止する。走破タイム、TI、上がりラップ、斤量増減、血統、馬場適性等の「純度100%の客観数値ファクト」を絶対の根拠として機械的に算出する。
+
+----------------------------------------------------------------
+■ 2. 評価ランク定義とS評価認定必須要件
+
+【S評価（軸・推奨）】  ：総合スコア 93点以上（原則1レースにつき1頭のみ）
+  ＜認定必須要件＞
+  以下の能力ファクト基準のうち【少なくとも1つ以上】を満たしている場合のみ配置を許可する。
+  1. 過去1年以内に重賞で複勝圏内（3着以内）の実績がある（または前年同重賞覇者）。
+  2. 当該コース・距離におけるタイム指数（TI）がメンバー中トップクラス（上位2頭以内）。
+  3. G1/G2級の格上レースで敗因明確な掲示板級（5着以内）実績を有する。
+  ※バフ上位馬の「A+抑え」措置：「枠順バイアス」「開幕週バイアス」「調教評価」等の各種バフ加算のみによって、絶対的能力が不足している馬が機械的に最高スコア（S評価）へ跳ね上がる現象を完全禁止する。能力未証明馬は最高でも「A+（ヒモ最高峰）」止まりとし、軸馬（S評価）としての単勝・1頭軸推奨を排除して軸飛びリスクを予防する。
+  ※【新設】開幕週外枠S保留規定：開幕1〜2週目のAコース開催時、7・8枠に入った馬は総合スコア93点以上でもS評価認定を保留し「A+（ヒモ最高峰）」留めとする。
+  ※傷病禁止規定：【傷病休養明け馬（6ヶ月以上）】はどれほど実績があってもS評価認定を「完全禁止」とする。
+
+【A+評価（相手・ヒモ）】：総合スコア 88～92点（勝ち負け・対抗級 / バフ上位の軸候補）
+【A評価（相手・ヒモ）】 ：総合スコア 84～87点（上位進出有力）
+【B+評価（相手・ヒモ）】：総合スコア 80～83点（3着以内・押さえ）
+【B評価（注・穴馬）】   ：総合スコア 74～79点（条件適合・バイアス/展開/過重ハンデ地力救済対象）
+【C評価（切り・消し）】 ：総合スコア 73点以下（掲示板外濃厚、消し）
+
+----------------------------------------------------------------
+■ 3. デバフ（減点）規定（★ver.8.3改訂）
+
+3-1. 【傷病・長期休養デバフ ＆ 鉄砲適性個別判定】（★ver.8.3アップデート）
+・半年以上の「骨折・屈腱炎・重大な傷病」による休養明け馬（6ヶ月/26週以上）：
+  - S評価認定を完全禁止（最高評価を「A+（ヒモ筆頭）」止め）。
+  - 【近5走点】および【調教点】から一律減算（6ヶ月以上：-5点～-10点、1年以上：-15点以上）。
+  - 過去の実績や調教時計がどれほど優秀であっても実戦勘欠如・再発リスクを最優先評価する。
+・4〜5ヶ月の中長期休養明け馬（非傷病）：
+  - 馬柱の「鉄砲 [X.X.X.X]（休み明け成績）」を直接チェックして個別判定。
+  - 鉄砲巧者（複勝率50%以上、または休み明けで重賞勝ち実績あり）：休養デバフ免除（0点）とし、S評価認定も許可。
+  - 鉄砲不振（複勝率50%未満・[0.0.0.X]等）または未証明馬：【近5走点】【調教点】から一律減算（-3点〜-5点）。
+
+3-2. 【血統的距離限界デバフ】（ver.8.0～継続）
+・父系・母系の血統構成および過去の好走距離から、今回の距離が本質的適性上限を200m以上オーバーしている馬：
+  - S評価認定を完全禁止とし、【血統点】および【展開点】から一律減算（一律-5点～-6点）。
+
+3-3. 【出遅れ癖×前残りバイアス不適合デバフ】（ver.8.0～継続）
+・出遅れ傾向（近5走で2回以上の出遅れ記載）がある馬 × 開幕週や前残りバイアス、小回り・短直線コース出走時：
+  - ポジショニング失敗リスクを考慮し【展開点】【馬場点】から一律減算（一律-3点～-5点）。
+
+3-4. 【ハンデ見込まれデバフ】（ver.8.0～継続）
+・前走で条件戦を勝ったばかりの上がり馬で、いきなり重賞に挑戦するにもかかわらず実績馬と同等以上の過重ハンデ（または同斤量）を課された過剰人気馬：
+  - 重賞のタフな激流と斤量消耗を考慮し、【近5走点】および【展開点】から一律減算（一律-5点）。※別定・定量戦で格上相手に同斤量を背負わされる不利な上がり馬にも同様適用。
+
+3-5. 【連戦疲労・過密ローテデバフ】（ver.8.0～継続）
+・中3週以内の連続激走や使い詰めによるパフォーマンス低下リスクがある上位人気馬：
+  - 【近5走点】および【展開点】から一律減算（一律-3点～-5点）。
+
+3-6. 【特殊タフ馬場（クッション値8.8未満）メンタル・ノメりデバフ】（ver.8.2新設）
+・クッション値8.8未満の特殊な粘土質・タフ馬場（表層が脚を取られる馬場）時：
+  - 気性が繊細な馬やフォームの大きい馬が「走るたびに足元を取られて気持ちが折れる（ノメり）」リスクを自動検知。
+  - 【近5走点】および【調教点】【展開点】から一律減算（一律-3点～-5点）。過剰人気馬の危険度を事前検知し軸飛びを防止する。
+
+3-7. 【開幕1〜2週目×7・8枠（外枠ロス）デバフ】（★ver.8.3新設）
+・開幕1〜2週目のAコース開催時、7・8枠に入った上位人気（1〜3番人気想定）馬：
+  - 外回しロス・距離ロスを考慮し【展開点】【馬場点】から一律減算（一律-3点〜-5点）。
+  - 総合スコア93点以上でもS評価認定を留め、「A+（ヒモ筆頭）」に自動制御する。
+
+----------------------------------------------------------------
+■ 4. ボーナス・救済加点規定（セーフティネット）
+
+4-1. 【ハンデ恵量ボーナス（アスクナイスショー/ピコローズ型）】
+・近走大敗も過去に3勝クラス以上勝利または重賞好走実績があり、今回ハンデで実績時から「2.0kg～3.0kg以上軽減」されている、または最軽量級（53.0kg以下）で出走可能な盲点馬：
+  - 極上の恵量と判断し、【出馬表点】【展開点】【総合スコア】に一律加算（一律+5点～最大+10点）し、自動的に上位（A+・A・B+）へ引き上げる。
+
+4-2. 【実績スランプ馬救済（オニャンコポン型）】
+・近5走がすべて2桁着順などのスランプ状態で【近5走点】が低くなっている馬であっても、「過去に同距離～中距離の重賞勝利実績」があり、今回のハンデが「54.0kg以下の軽量」の場合：
+  - C評価（切り）の制約を強制解除し、自動的に「B評価（注・R列〇）」へ救済据え置き。
+
+4-3. 【スランプ・異条件帰り救済】
+・障害レース帰り、またはダートからの芝復帰組（あるいは芝からのダート初挑戦組）で、過去に重賞・オープン級での好走実績を持つ馬：
+  - 近走不振による過剰人気急落を逆手にとり、評価ランク「B評価（注・R列〇）」へ救済補完。
+
+4-4. 【死んだふりイン突き補正（最内ロスゼロ・スタミナ温存強襲）】
+・激流消耗戦や先行激化が想定されるレースにおいて、内枠（1～3枠）または軽量の馬が「後方待機～イン追走」で立ち回り、距離ロスを極限まで削ってスタミナを温存、直線でインから一気に強襲する展開バイアスに該当する場合：
+  - 【展開点】および【馬場点】に一律加算（＋3点～最大＋5点）。
+
+4-5. 【開幕週・先行バイアス自動加算】
+・開幕1～2週目において、近5走で「3・4角4番手以内通過」実績が複数回ある逃げ・先行馬：
+  - 【展開点】および【馬場点】に一律加算（＋3点～最大＋5点）。C評価に沈みそうな先行馬であっても自動的に「B評価（注・ヒモ穴）」へ強制救済。
+
+4-6. 【超ハイペース（激流消耗戦）連動補正】
+・逃げ・先行同型馬が3頭以上激突し、前半1000mが超ハイペースの激流消耗戦想定時：
+  - 前追走の上位人気馬の斤量デバフを1.5倍に強化。同時に過去に差し・追い込み複勝圏内実績が豊富な後方待機馬の【展開点】【馬場点】倍率を1.2倍に上方修正。
+
+4-7. 【前走アクシデント度外視全額返還】
+・前走明確な不利（接触・挟まれ・直線前詰まり・出遅れ等）やトラックバイアス完全逆向で大敗しているが、本来のTI水準・重賞実績が高い馬（※傷病明け除く）：
+  - 【近5走点】に「度外視全額返還（最大+10点）」を行い、能力通りの評価ランク（A～A+）へ引き上げる。
+
+4-8. 【長距離超スロー向正面捲り奇襲補正（シートゥサミット型）】
+・対象：芝2400m以上の長距離戦。
+・条件：明確な逃げ馬不在による「超スローペース」が想定され、かつ長距離実績を持つ先行・捲り型穴馬。
+・規定：一律でC評価（切り）とせず【展開点】に補正を加え「B評価（注・セーフティネット救済・R列〇）」へ優先的に昇格救済する。
+
+4-9. 【過重ハンデ地力馬・距離延長救済（ヴァルツァーシャル型）】
+・対象：ハンデ58.5kg以上の過重ハンデ馬、または初の距離延長・展開不適合に見える実績馬。
+・条件：過去に「58.5kg〜60.0kg以上の過重斤量・別定戦で1〜3着好走実績」がある、または「G1/G2等の格上重賞で連対・掲示板級の地力」を持つ馬。
+・規定：酷量や距離・展開不適合のデータデバフがかかった場合でも、地力と斤量耐性による一変確率が高いため「C評価（切り）」へ落とすことを完全禁止とし、優先的に「B評価（注・セーフティネット救済・R列〇）」へ据え置き救済する。
+
+4-10. 【逃げ馬（ハナ宣言馬）単騎セーフティネット救済補正】（ver.8.2新設）
+・明確な単騎ハナ宣言があるスピード馬：
+  - 同型多数や激流想定、連戦疲労判定があっても、後続の牽制合いによる「単騎楽逃げ・粘り残り」を想定。
+  - 必ず最低【ヒモ（B+評価以上）】として評価表および買い目に強制残留させる。
+
+4-11. 【特殊タフ馬場パワー適性バフ】（ver.8.2新設）
+・クッション値8.8未満時、馬体重500kg以上の大型パワー型、ダート重賞実績馬、または欧州スタミナ血統馬：
+  - 【馬場点】および【展開点】へ一律優先加算（＋2点～＋3点）。
+
+4-12. 【鉄砲巧者（休み明け特化）バフ】（★ver.8.3新設）
+・休み明け成績（鉄砲成績）の複勝率が50%以上、または休み明けで重賞勝利実績がある鉄砲特化馬：
+  - 【調教点】および【展開点】に補正加算（＋2点～＋3点）。
+
+----------------------------------------------------------------
+■ 5. 表記・プロ評価統合ルール
+
+5-1. 【固有名詞の完全遮断・プロ統一】（ver.8.0～継続）
+・評価表およびメモ欄内・出力テキストにおいて、特定の競馬関係者、有名プロ、YouTube（うまログ等）の出演者個人名・番組名・チャンネル名は「一切記載禁止（100%完全遮断）」。
+・すべての意見・予想ファクトは「プロ」「プロ評価」（例：「プロの視点でも…」「プロも軸評価…」等）という表現に一律100%完全統一して記述する。
+
+5-2. 【プロ評価の集計と反映・クロスチェック規則】
+・参考URL（グループ4）等から取得したプロの本命・推奨が集中している馬、または穴馬として評価が急上昇している馬は、分析に組み込み「※プロ陣営本命推奨」「※プロ陣営注目穴馬」として総合スコアおよびメモにファクトとして反映させる（※評価結果を直接歪めない補助情報として扱う）。
+
+----------------------------------------------------------------
+■ 6. スプレッドシート（20列TSV）フォーマット＆出力仕様
+
+【最重要指示・全出走馬（1番〜最終馬番）の完全出力】
+提供されたデータに含まれる対象レースの出走馬を絶対に1頭も省略せず、馬番1から最後の馬番まで【全頭分】漏れなく出力してください！
+
+【最重要指示・メモの全頭詳細記載ルール】
+『メモ（T列）』欄には、全頭に対して必ず以下の要素を具体的に詳しく記述してください：
+- 本命・推奨の理由、または評価を下げるに至った根拠（プロ見解との相乗効果含む）
+- 近5走や血統面、調教から見える好走条件・不安要素、および特殊ラベル
+- レース展開（ペース・脚質）との相性
+※短く終わらせることは絶対に厳禁です！必ず1頭あたり具体的な分析理由を長文で書いてください。
+"""
+
+
+def safe_int(val, default=0):
+    try:
+        if isinstance(val, (pd.Series, list)):
+            val = val[0] if len(val) > 0 else default
+        num = pd.to_numeric(val, errors='coerce')
+        if pd.isna(num):
+            return default
+        return int(num)
+    except Exception:
+        return default
+
+
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            df = pd.read_csv(DB_FILE)
+            if "総合スコア" in df.columns:
+                df["総合スコア"] = pd.to_numeric(df["総合スコア"], errors='coerce').fillna(0).astype(int)
+                df = df.sort_values(by="総合スコア", ascending=False).reset_index(drop=True)
+            if "総合スコアグラフ" in df.columns:
+                df = df.drop(columns=["総合スコアグラフ"])
+            return df
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def parse_json_ai_output(result_text):
+    parsed_rows = []
+    race_title = "レース解析"
+    confidence = ""
+    risk_level = ""
+    recommended_tickets = []
+
+    try:
+        clean_text = result_text.strip()
+        if "```json" in clean_text:
+            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_text:
+            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+
+        data = json.loads(clean_text)
+        race_title = data.get("race_name", "レース解析")
+        confidence = data.get("confidence", "")
+        risk_level = data.get("risk_level", "")
+        recommended_tickets = data.get("recommended_tickets", [])
+
+        horses = data.get("horses", [])
+
+        for h in horses:
+            h_num = safe_int(h.get("horse_num", 0))
+            h_name = str(h.get("horse_name", "")).strip()
+            pop_val = str(h.get("pop", "-")).strip()
+            total_score = safe_int(h.get("total_score", 80))
+            rank_eval = str(h.get("eval", "A")).strip()
+
+            score_shubahyou = safe_int(h.get("score_shubahyou", total_score))
+            score_kettou = safe_int(h.get("score_kettou", total_score))
+            score_choukyou = safe_int(h.get("score_choukyou", total_score))
+            score_kin5so = safe_int(h.get("score_kin5so", total_score))
+            score_tenkai = safe_int(h.get("score_tenkai", total_score))
+            score_baba = safe_int(h.get("score_baba", total_score))
+
+            jiku = "〇" if str(h.get("jiku", "")).strip() == "〇" or rank_eval in ["S", "S+", "A+"] else ""
+            himo = "〇" if str(h.get("himo", "")).strip() == "〇" or (not jiku and rank_eval in ["A", "A-", "B+", "B"]) else ""
+            kiri = "〇" if str(h.get("kiri", "")).strip() == "〇" or (not jiku and not himo) else ""
+
+            memo = str(h.get("memo", "")).strip()
+            if not memo or len(memo) < 10:
+                memo = f"【評価理由】総合スコア{total_score}点。データ・血統・適性面を考慮して評価を算出。"
+
+            if h_num > 0 and h_name:
+                parsed_rows.append({
+                    "馬番": h_num,
+                    "馬名": h_name,
+                    "予想人気": pop_val,
+                    "総合スコア": total_score,
+                    "評価": rank_eval,
+                    "出馬表点": score_shubahyou,
+                    "血統点": score_kettou,
+                    "調教点": score_choukyou,
+                    "近5走点": score_kin5so,
+                    "展開点": score_tenkai,
+                    "馬場点": score_baba,
+                    "軸": jiku,
+                    "ヒモ": himo,
+                    "切り": kiri,
+                    "メモ": memo
+                })
+
+    except Exception as e:
+        st.warning(f"⚠️ JSON読み込み処理中: {e}")
+
+    if not parsed_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(parsed_rows)
+    df["レース名"] = race_title
+
+    if confidence:
+        df["信頼度"] = confidence
+    if risk_level:
+        df["波乱度"] = risk_level
+    if recommended_tickets:
+        df["推奨買い目"] = json.dumps(recommended_tickets, ensure_ascii=False)
+
+    return df
+
+
+def render_race_evaluation_view(df, is_viewer_mode=False):
+    if df.empty:
+        st.warning("⚠️ 表示できる解析データがありません。再度分析を実行してください。")
+        return
+
+    race_title = df["レース名"].iloc[0] if "レース名" in df.columns and not df.empty else "競馬予想解析"
+    view_df = df.drop(columns=["レース名", "信頼度", "波乱度", "推奨買い目"], errors='ignore')
+
+    honmei_horse = view_df.iloc[0] if not view_df.empty else None
+    h_score = safe_int(honmei_horse.get("総合スコア", 0)) if honmei_horse is not None else 0
+
+    if "信頼度" in df.columns and str(df["信頼度"].iloc[0]).strip():
+        jiku_rank = str(df["信頼度"].iloc[0])
+    else:
+        if h_score >= 92:
+            jiku_rank = "S (鉄板軸)"
+        elif h_score >= 87:
+            jiku_rank = "A (有力軸)"
+        else:
+            jiku_rank = "B (波乱含み)"
+
+    if "波乱度" in df.columns and str(df["波乱度"].iloc[0]).strip():
+        risk_level = str(df["波乱度"].iloc[0])
+    else:
+        top5_diff = (safe_int(view_df.iloc[0]["総合スコア"]) - safe_int(view_df.iloc[4]["総合スコア"])) if len(view_df) >= 5 else 0
+        if top5_diff >= 10:
+            risk_level = "★☆☆ (本命堅調)"
+        elif top5_diff >= 5:
+            risk_level = "★★☆ (中波乱警戒)"
+        else:
+            risk_level = "★★★ (大波乱混戦)"
+
+    df_copy = view_df.copy()
+    df_copy["予想人気_num"] = pd.to_numeric(df_copy["予想人気"], errors='coerce').fillna(0) if "予想人気" in df_copy.columns else 0
+    ana_candidates = df_copy[df_copy["予想人気_num"] >= 4] if "予想人気_num" in df_copy.columns else pd.DataFrame()
+    ana_horse = ana_candidates.iloc[0] if not ana_candidates.empty else (view_df.iloc[1] if len(view_df) > 1 else honmei_horse)
+
+    h_num = str(safe_int(honmei_horse["馬番"], default=1)) if honmei_horse is not None and "馬番" in honmei_horse else "1"
+    h_name = str(honmei_horse["馬名"]) if honmei_horse is not None and "馬名" in honmei_horse else "本命馬"
+
+    aite_rows = view_df.iloc[1:6] if len(view_df) > 1 else view_df
+    aite_nums = [str(safe_int(r["馬番"], default=i+1)) for i, (_, r) in enumerate(aite_rows.iterrows())] if "馬番" in view_df.columns else ["1", "2", "3"]
+    aite_str = ", ".join(aite_nums)
+
+    raw_tickets = df["推奨買い目"].iloc[0] if "推奨買い目" in df.columns else None
+    tickets_list = []
+    if raw_tickets:
+        try:
+            tickets_list = json.loads(raw_tickets)
+        except Exception:
+            pass
+
+    if not tickets_list:
+        tickets_list = [
+            f"【単勝・複勝】 {h_num} （{h_name}）",
+            f"【馬連・ワイド 軸1頭流し】 {h_num} ＝ {aite_str}",
+            f"【3連複 軸1頭流し】 {h_num} － {aite_str}"
+        ]
+
+    view_tab1, view_tab2 = st.tabs(["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"])
+
+    with view_tab1:
+        st.markdown(f"<h2 style='text-align: center; color: #f39c12;'>🏇 {race_title} 🏇</h2>", unsafe_allow_html=True)
+        st.write("")
+
+        col_left, col_right = st.columns([1, 1.3])
+
+        with col_left:
+            st.markdown(f"""
+            <div class="risk-card">
+                <div class="card-title">🔥 レース展開 ＆ 波乱度判定</div>
+                <div style="display:flex; justify-content:space-around; margin-top:10px;">
+                    <div style="flex:1; text-align:center;">
+                        <span style="color:#aaa; font-size:0.85rem;">軸馬信頼度</span><br>
+                        <b style="font-size:1.3rem; color:#00f0ff;">{jiku_rank}</b>
+                    </div>
+                    <div style="flex:1; text-align:center;">
+                        <span style="color:#aaa; font-size:0.85rem;">波乱度レベル</span><br>
+                        <b style="font-size:1.3rem; color:#ffd700;">{risk_level}</b>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if honmei_horse is not None:
+                h_pop = honmei_horse.get("予想人気", "-")
+                st.markdown(f"""
+                <div class="honmei-card">
+                    <div class="card-title">◎ 本命推奨馬</div>
+                    <div class="card-horse-name">【{h_num}】{h_name}</div>
+                    <div style="display:flex; justify-content:space-around; margin-top:10px;">
+                        <div style="flex:1; text-align:center;">
+                            <span style="color:#aaa; font-size:0.8rem;">想定人気</span><br>
+                            <b style="font-size:1.4rem; color:#fff;">{h_pop} 人気</b>
+                        </div>
+                        <div style="flex:1; text-align:center;">
+                            <span style="color:#aaa; font-size:0.8rem;">指数合計値</span><br>
+                            <b class="card-val-gold">{h_score}</b>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            if ana_horse is not None:
+                a_num = str(safe_int(ana_horse.get("馬番", 1)))
+                a_name = str(ana_horse.get("馬名", "穴馬"))
+                a_pop = ana_horse.get("予想人気", "-")
+                a_score = safe_int(ana_horse.get("総合スコア", 0))
+                st.markdown(f"""
+                <div class="anaba-card">
+                    <div class="card-title">⚠ 注目波乱馬（穴馬）</div>
+                    <div class="card-horse-name">【{a_num}】{a_name}</div>
+                    <div style="display:flex; justify-content:space-around; margin-top:10px;">
+                        <div style="flex:1; text-align:center;">
+                            <span style="color:#aaa; font-size:0.8rem;">想定人気</span><br>
+                            <b style="font-size:1.4rem; color:#fff;">{a_pop} 人気</b>
+                        </div>
+                        <div style="flex:1; text-align:center;">
+                            <span style="color:#aaa; font-size:0.8rem;">指数合計値</span><br>
+                            <b class="card-val-red">{a_score}</b>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with col_right:
+            st.subheader("📊 総合評価順位一覧")
+
+            sub_cols = [c for c in ["馬番", "馬名", "予想人気", "総合スコア"] if c in view_df.columns]
+            disp_df = view_df[sub_cols].copy()
+            if "馬番" in disp_df.columns:
+                disp_df["馬番"] = pd.to_numeric(disp_df["馬番"], errors='coerce').fillna(0).astype(int)
+            if "総合スコア" in disp_df.columns:
+                disp_df["総合スコア"] = pd.to_numeric(disp_df["総合スコア"], errors='coerce').fillna(0).astype(int)
+
+            col_config_sum = {
+                "総合スコア": st.column_config.ProgressColumn(
+                    "指数合計値", format="%d点", min_value=0, max_value=100
+                )
+            }
+
+            top_group = disp_df.head(5)
+            sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
+
+            st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
+            st.dataframe(top_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
+
+            if not sub_group.empty:
+                st.write("🟡 **相手紐・穴馬グループ**")
+                st.dataframe(sub_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
+
+        st.subheader("💡 推奨買い目フォーメーション")
+
+        for t_item in tickets_list:
+            clean_t = re.sub(r'<[^>]+>', '', str(t_item)).strip()
+            if clean_t:
+                circled_t = convert_to_circled_numbers(clean_t)
+
+                st.markdown(f"""
+                <div class="kaime-card-item">
+                    📌 <b>{circled_t}</b>
+                </div>
+                """, unsafe_allow_html=True)
+
+    with view_tab2:
+        st.subheader(f"📊 {race_title} 詳細全データ表（評価順）")
+
+        col_config_detail = {
+            "馬番": st.column_config.NumberColumn("馬番", width="small"),
+            "馬名": st.column_config.TextColumn("馬名", width="medium"),
+            "予想人気": st.column_config.TextColumn("予想人気", width="small"),
+            "総合スコア": st.column_config.ProgressColumn("総合スコア", format="%d点", min_value=0, max_value=100, width="medium"),
+            "評価": st.column_config.TextColumn("評価", width="small"),
+            "出馬表点": st.column_config.NumberColumn("出馬表点", width="small"),
+            "血統点": st.column_config.NumberColumn("血統点", width="small"),
+            "調教点": st.column_config.NumberColumn("調教点", width="small"),
+            "近5走点": st.column_config.NumberColumn("近5走点", width="small"),
+            "展開点": st.column_config.NumberColumn("展開点", width="small"),
+            "馬場点": st.column_config.NumberColumn("馬場点", width="small"),
+            "軸": st.column_config.TextColumn("軸", width="small"),
+            "ヒモ": st.column_config.TextColumn("ヒモ", width="small"),
+            "切り": st.column_config.TextColumn("切り", width="small"),
+            "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large")
+        }
+
+        st.dataframe(view_df, column_config=col_config_detail, use_container_width=False, height=520, hide_index=True)
+
+
+# カスタムCSS
+st.markdown("""
+<style>
+    .main { background-color: #080a0f; }
+    h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
+
+    div[data-testid="stDataFrame"] div[role="progressbar"] {
+        height: 14px !important;
+        border-radius: 4px !important;
+        background-color: #1e2638 !important;
+    }
+    div[data-testid="stDataFrame"] div[role="progressbar"] > div {
+        background: linear-gradient(90deg, #107c41 0%, #21a366 100%) !important;
+        border-radius: 4px !important;
+    }
+    
+    .risk-card {
+        background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+        border: 2px solid #00f0ff;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 15px;
+        box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+    }
+    .honmei-card {
+        background: linear-gradient(135deg, #2b1e00 0%, #4a3500 100%);
+        border: 2px solid #f39c12;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 0 15px rgba(243, 156, 18, 0.4);
+    }
+    .anaba-card {
+        background: linear-gradient(135deg, #3a0007 0%, #5c000b 100%);
+        border: 2px solid #e74c3c;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 0 15px rgba(231, 76, 60, 0.4);
+    }
+    .kaime-card-item {
+        background: #111622;
+        border: 2px solid #ffd700;
+        border-left: 6px solid #ffd700;
+        border-radius: 8px;
+        padding: 12px 18px;
+        margin-bottom: 12px;
+        font-size: 1.15rem;
+        color: #ffffff;
+        box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+    }
+    .card-title { font-size: 1.1rem; font-weight: bold; color: #ffffff; }
+    .card-horse-name { font-size: 1.6rem; font-weight: bold; color: #ffffff; margin: 5px 0; }
+    .card-val-gold { font-size: 2.2rem; font-weight: bold; color: #f39c12; }
+    .card-val-red { font-size: 2.2rem; font-weight: bold; color: #ff4d4d; }
+    .card-val-blue { font-size: 2.0rem; font-weight: bold; color: #00f0ff; }
+    
+    .stButton>button {
+        background: linear-gradient(135deg, #f39c12 0%, #d35400 100%);
+        color: #ffffff; font-weight: bold; border-radius: 8px; border: none;
+        padding: 0.6rem 2rem; box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);
+    }
+    .stButton>button:hover { background: linear-gradient(135deg, #e67e22 0%, #e74c3c 100%); }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ==================================================
+# 🚀 閲覧専用モード分岐（知人がURLでアクセスしてきた場合）
+# ==================================================
+query_params = st.query_params
+
+if "race" in query_params:
+    target_race_param = query_params["race"]
+    db_df = load_db()
+
+    st.title("🏇 AI分析 レース予想ポータル")
+
+    if not db_df.empty and "レース名" in db_df.columns:
+        matched_df = db_df[db_df["レース名"].astype(str) == str(target_race_param)]
+        if not matched_df.empty:
+            render_race_evaluation_view(matched_df, is_viewer_mode=True)
+        else:
+            st.error(f"⚠️ レース「{target_race_param}」の解析データは見つかりませんでした。")
+    else:
+        st.error("⚠️ データベースに予想データが登録されていません。")
+
+    st.stop()
+
+
+# ==================================================
+# 👑 通常モード（アニキ専用管理・解析画面）
+# ==================================================
+
+def load_saved_rules(file_path, default_text):
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                if content.strip():
+                    return content
+        except Exception:
+            return default_text
+    return default_text
+
+
+def save_rules_to_file(file_path, rule_text):
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(rule_text)
+
+
+if "g1_text_val" not in st.session_state:
+    st.session_state["g1_text_val"] = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+
+if "gen_text_val" not in st.session_state:
+    st.session_state["gen_text_val"] = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+
+
+def save_to_db(new_df):
+    if new_df.empty:
+        return load_db()
+    clean_save_df = new_df.drop(columns=["総合スコアグラフ"], errors='ignore')
+    if os.path.exists(DB_FILE):
+        try:
+            old_df = pd.read_csv(DB_FILE)
+            if "総合スコアグラフ" in old_df.columns:
+                old_df = old_df.drop(columns=["総合スコアグラフ"])
+            combined_df = pd.concat([old_df, clean_save_df], ignore_index=True)
+            combined_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+            return combined_df
+        except Exception:
+            clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+            return clean_save_df
+    else:
+        clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+        return clean_save_df
+
+
+def delete_race_from_db(race_name):
+    if os.path.exists(DB_FILE):
+        try:
+            df = pd.read_csv(DB_FILE)
+            if "レース名" in df.columns:
+                new_df = df[df["レース名"].astype(str) != str(race_name)]
+                new_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def clear_db():
+    if os.path.exists(DB_FILE):
+        try:
+            os.remove(DB_FILE)
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def extract_text_from_pdf(pdf_file, page_option="1ページ目のみ"):
+    text = ""
+    pdf_file.seek(0)
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            if len(pdf.pages) > 0:
+                pages_to_process = pdf.pages if page_option == "全ページ読み込む" else [pdf.pages[0]]
+                for i, page in enumerate(pages_to_process):
+                    page_text = page.extract_text(layout=True)
+                    if not page_text or len(page_text.strip()) < 30:
+                        page_text = page.extract_text()
+                    if page_text:
+                        text += f"\n--- 【PDF {i+1}ページ目抽出テキスト】 ---\n" + page_text + "\n"
+    except Exception:
+        pdf_file.seek(0)
+        try:
+            reader = pypdf.PdfReader(pdf_file)
+            if len(reader.pages) > 0:
+                pages_to_process = reader.pages if page_option == "全ページ読み込む" else [reader.pages[0]]
+                for i, page in enumerate(pages_to_process):
+                    t = page.extract_text()
+                    if t:
+                        text += f"\n--- 【PDF {i+1}ページ目抽出テキスト】 ---\n" + t + "\n"
+        except Exception:
+            pass
+    return text
+
+
+def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
+    prompt_text = ""
+    media_parts = []
+
+    if files_list:
+        for f in files_list:
+            fname = f.name
+            f.seek(0)
+            file_bytes = f.read()
+
+            if fname.lower().endswith(".txt"):
+                content = file_bytes.decode("utf-8", errors="ignore")
+                if any(k in fname for k in ["過去", "傾向", "データ", "歴史", "前日", "回顧"]):
+                    prompt_text += f"\n=========================================\n【⚠️注意：ファイル「{fname}」は過去の参考資料です。載っている馬名は今回の出走馬ではありません！】\n=========================================\n" + content
+                else:
+                    prompt_text += f"\n=========================================\n【確定メイン出馬データファイル: {fname}】\n=========================================\n" + content
+
+            else:
+                extracted = extract_text_from_pdf(f, page_option=pdf_page_option)
+                if extracted.strip():
+                    if any(k in fname for k in ["過去", "傾向", "データ", "歴史", "前日", "回顧"]):
+                        prompt_text += f"\n=========================================\n【⚠️注意：ファイル「{fname}」は過去の参考資料です】\n=========================================\n" + extracted
+                    else:
+                        prompt_text += f"\n=========================================\n【確定メイン出馬データ（PDF抽出）: {fname}】\n=========================================\n" + extracted
+
+                mime = f.type
+                if not mime or mime == "application/octet-stream":
+                    if fname.lower().endswith(".pdf"):
+                        mime = "application/pdf"
+                    elif fname.lower().endswith(".png"):
+                        mime = "image/png"
+                    elif fname.lower().endswith((".jpg", ".jpeg")):
+                        mime = "image/jpeg"
+
+                if mime:
+                    media_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime))
+
+    return prompt_text, media_parts
+
+
+def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, text_group2, parts_group2, text_group3, parts_group3, text_group4, model_name):
+    client = genai.Client(api_key=api_key)
+
+    json_prompt = f"""{active_rules}
+
+【最重要・出走馬の確定判定指示（テキスト＆スクショ画像の両方を視覚的に解析せよ）】
+添付されているテキストデータおよびスクショ画像/PDFから、今回のレースの【本物の出走馬一覧】を視覚的にも確認して抽出してください。
+
+★【過去データ馬の絶対除外規則】：
+資料内に「過去データ」「傾向」などの文脈で含まれている過去の馬（例: ブローザホーン, ドウデュース, ジャスティンパレス, ベラジオオペラ, ローシャムパーク, プラダリア, ディープボンド, ソールオリエンス等）は【今回の出走馬ではありません】！絶対に出力に含めないでください！
+
+★【今回の本物出走馬の絶対条件】：
+・今回対象レースの「確定出馬表（メイン馬柱スクショまたは確定データ）」に載っている馬です。
+・馬番が 1 から順番に最後の馬番まで（1, 2, 3...）連続して並んでいる出走馬【全頭】を抽出してください。
+
+★【グループ4：プロ予想・YouTube・Web参考URLのクロスチェック規則】：
+グループ4（うまログ等のYouTube字幕やWeb予想データ）が含まれている場合は、プロ陣営が本命・穴馬として推奨している馬のコメントや理由を分析に組み込み、総合スコアや『メモ』列の詳細根拠に「※プロ陣営本命推奨」「※プロ陣営注目穴馬」等の補足も含めて反映してください！
+
+【推奨券種・買い目フォーメーション表記の最重要ルール】
+買い目に出力する【馬番の数字】は、必ず ①、②、③、④、⑤ ... ⑱ のような【丸囲み数字】で出力してください！
+例：
+- "【単勝】 ⑤ （クロワデュノール）"
+- "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰"
+- "【3連複 フォーメーション】 ⑤ － ①, ②, ⑯ － ①, ②, ⑧, ⑨, ⑪, ⑯, ⑰"
+
+=== 【グループ1：テキスト・スクショ・PDFデータ】 ===
+{text_group1}
+
+=== 【グループ2：競馬ブックデータ（スクショ画像/PDFデータ）】 ===
+{text_group2}
+
+=== 【グループ3：前日傾向・馬場情報データ】 ===
+{text_group3}
+
+=== 【グループ4：プロ予想・YouTube字幕・Web参考URL抽出データ】 ===
+{text_group4}
+
+【出力形式】
+以下のJSON形式のみを出力してください。
+
+{{
+  "race_name": "特定した実際のレース名（例：宝塚記念(G1)）",
+  "confidence": "軸馬信頼度判定（例：S (鉄板軸) / A (有力軸) / B (波乱含み)）",
+  "risk_level": "波乱度判定（例：★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)）",
+  "recommended_tickets": [
+    "【単勝】 ⑤ （クロワデュノール）",
+    "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰",
+    "【3連複 フォーメーション】 ⑤ － ①, ②, ⑯ － ①, ②, ⑧, ⑨, ⑪, ⑯, ⑰"
+  ],
+  "horses": [
+    {{
+      "horse_num": 1,
+      "horse_name": "メイン出馬表に存在する正確な馬名",
+      "pop": "予想人気",
+      "total_score": 85,
+      "eval": "評価ランク（S, A+, A, A-, B+, B, C等）",
+      "score_shubahyou": 出馬表点(0-100),
+      "score_kettou": 血統点(0-100),
+      "score_choukyou": 調教点(0-100),
+      "score_kin5so": 近5走点(0-100),
+      "score_tenkai": 展開点(0-100),
+      "score_baba": 馬場点(0-100),
+      "jiku": "軸なら〇、違えば空文字",
+      "himo": "ヒモなら〇、違えば空文字",
+      "kiri": "切りなら〇、違えば空文字",
+      "memo": "本命理由・血統・近5走・展開相性・プロ推奨理由などの長文詳細分析メモ"
+    }}
+  ]
+}}
+
+【最重要遵守事項】
+・確定出馬表にある1番〜最終馬番まで絶対に途中で切らず【全頭】出力すること。
+・解説文章や挨拶は一切含めず、純粋なJSONのみを出力すること。
+"""
+
+    contents_payload = [json_prompt]
+    contents_payload.extend(parts_group1)
+    contents_payload.extend(parts_group2)
+    contents_payload.extend(parts_group3)
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents_payload,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            return response.text
+        except Exception as e:
+            err_msg = str(e)
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                else:
+                    raise Exception("⚠️ Googleサーバーが一時的に混雑しています。15秒ほど置いて再度実行ボタンを押してください。")
+            elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                raise Exception("⚠️ 本日の無料枠上限に達しました。別アカウントのAPIキーをご使用いただくか明日までお待ちください。")
+            else:
+                raise e
+
+
+st.title("🏇 ウマエル自動解析システム v1.0")
+st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
+
+# --------------------------------------------------
+# 🧭 左側サイドバー（ナビゲーション ＆ システム設定格納）
+# --------------------------------------------------
+with st.sidebar:
+    st.header("🧭 ナビゲーション")
+    
+    # 4つのメニューをサイドバーのラジオボタンとして配置
+    selected_menu = st.radio(
+        "移動する機能を選択してください：",
+        [
+            "📋 レース分析・予想",
+            "⚙️ ルール管理・アップデート",
+            "🔄 回顧・精度検証",
+            "🗄 過去馬データベース（プール）"
+        ],
+        index=0
+    )
+
+    st.divider()
+
+    # システム設定をアコーディオン（expander）の中にすっきり格納
+    with st.expander("⚙️ システム設定", expanded=False):
+        saved_key = load_api_key()
+        api_key = st.text_input("Gemini API Key", value=saved_key, type="password", help="入力すると自動で保存され、次回から自動ロードされます")
+
+        if api_key and api_key != saved_key:
+            save_api_key(api_key)
+
+        selected_model = st.selectbox(
+            "🤖 使用AIモデル",
+            ["gemini-3.8-flash"],
+            index=0,
+            help="現行推奨モデル: gemini-3.8-flash"
+        )
+        st.caption("🔑 APIキー自動保存機能オン")
+        st.caption("📱 スマホ表示対応モード動作中")
+
+# --------------------------------------------------
+# 🎯 メインエリア画面分岐（サイドバー選択に応じて表示）
+# --------------------------------------------------
+
+# --------------------------------------------------
+# 1. 📋 レース分析・予想
+# --------------------------------------------------
+if selected_menu == "📋 レース分析・予想":
+    st.subheader("🎯 解析ルールの選択 ＆ データアップロード")
+
+    rule_type = st.radio(
+        "今回解析するレースのルールを選択してください：",
+        ["🏆 G1専用ルール", "🏇 平場・G2・G3専用ルール"],
+        horizontal=True
+    )
+
+    if "G1専用" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+        st.info("💡 現在 【 🏆 G1専用ルール 】 が選択されています。")
+    else:
+        active_selected_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+        st.info("💡 現在 【 🏇 平場・G2・G3専用ルール 】 が選択されています。")
+
+    with st.expander("🔍 適用されるルール文面を確認（クリックで展開）"):
+        st.text_area("選択中のルールテキスト", value=active_selected_rule, height=150, disabled=True)
+
+    st.divider()
+    st.subheader("📂 解析データのアップロード (.txt / .pdf / .png / .jpg / URL)")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        files_group1 = st.file_uploader(
+            "1. 出馬表・近5走・オッズ (.txt / .pdf / .png / .jpg)",
+            type=["txt", "pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            help="出馬表.txt、netkeiba等のスクショ画像・PDF、血統、オッズデータなど"
+        )
+        if files_group1:
+            st.success(f"✅ {len(files_group1)} 件のデータ")
+
+    with col2:
+        files_group2 = st.file_uploader(
+            "2. 競馬ブックデータ (.pdf / .png / .jpg)",
+            type=["pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            help="競馬ブック新聞PDFやスマホスクショ画像（PNG/JPG対応）"
+        )
+        pdf_page_opt = st.radio(
+            "📄 競馬ブックPDFの読み込み範囲",
+            ["1ページ目のみ（推奨：馬柱全頭）", "全ページ読み込む"],
+            index=0,
+            key="pdf_page_opt"
+        )
+        if files_group2:
+            st.success(f"✅ {len(files_group2)} 件のデータ")
+
+    with col3:
+        files_group3 = st.file_uploader(
+            "3. 前日の傾向・馬場情報 (.txt / .pdf / .png / .jpg)",
+            type=["txt", "pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            help="トラックバイアス、馬場傾向、好走枠・脚質データなど"
+        )
+        if files_group3:
+            st.success(f"✅ {len(files_group3)} 件のデータ")
+
+    st.write("")
+    urls_group4_input = st.text_area(
+        "🔗 4. プロ予想・YouTube・Web参考URL（改行して複数貼り付けOK）",
+        height=100,
+        placeholder="https://www.youtube.com/watch?v=...\nhttps://note.com/...",
+        help="うまログのYouTube動画URLやnote記事URLなどをペタッと貼ると、自動で動画の字幕や記事本文を読み込んでクロスチェックします！"
+    )
+
+    st.divider()
+
+    if st.button("🔥 AI分析を実行する", use_container_width=True):
+        if not api_key:
+            st.error("⚠️ サイドバーの「⚙️ システム設定」を展開し、Gemini API Keyを入力してください！")
+        elif not files_group1 and not files_group2 and not files_group3 and not urls_group4_input.strip():
+            st.warning("⚠️ 解析するデータファイルまたはURLを1つ以上入力してください！")
+        else:
+            with st.spinner(f"🏇 AIが【{selected_model}】で【{rule_type}】に基づき深層解析中..."):
+                try:
+                    pdf_opt_val = "1ページ目のみ" if "1ページ目のみ" in pdf_page_opt else "全ページ"
+
+                    t1, p1 = prepare_file_parts(files_group1, pdf_page_option=pdf_opt_val)
+                    t2, p2 = prepare_file_parts(files_group2, pdf_page_option=pdf_opt_val)
+                    t3, p3 = prepare_file_parts(files_group3, pdf_page_option=pdf_opt_val)
+
+                    t4 = process_multiple_urls(urls_group4_input)
+
+                    result_text = analyze_data_with_gemini(
+                        api_key, active_selected_rule,
+                        t1, p1, t2, p2, t3, p3, t4,
+                        selected_model
+                    )
+
+                    df = parse_json_ai_output(result_text)
+
+                    if not df.empty and "総合スコア" in df.columns:
+                        df["総合スコア"] = pd.to_numeric(df["総合スコア"], errors='coerce').fillna(0).astype(int)
+                        df = df.sort_values(by="総合スコア", ascending=False).reset_index(drop=True)
+
+                        st.success(f"🎉 【{rule_type}】に基づく解析が完了し、データベースにプールされました！")
+                        save_to_db(df)
+
+                        race_title = df["レース名"].iloc[0] if "レース名" in df.columns else "競馬予想解析"
+
+                        st.info("🔗 **知人共有用URLパラメータ（Web公開後、アプリURLの末尾に付けて送信可能）：**")
+                        st.code(f"?race={race_title}", language="text")
+
+                        render_race_evaluation_view(df, is_viewer_mode=False)
+                    else:
+                        st.error("⚠️ アップロードされたデータから出走馬を検出できませんでした。画像や出馬表データが入っているか確認してください。")
+
+                    with st.expander("🛠 AI応答データの確認（トラブルシューティング用）"):
+                        st.text_area("AI生の回答テキスト", value=result_text, height=200)
+
+                except Exception as e:
+                    st.error(f"❌ 解析中にエラーが発生しました:\n{e}")
+
+# --------------------------------------------------
+# 2. ⚙️ ルール管理・アップデート
+# --------------------------------------------------
+elif selected_menu == "⚙️ ルール管理・アップデート":
+    st.subheader("⚙️ 解析ルールの管理・アップデート")
+    st.write("「G1専用」と「平場・G2・G3専用」のルールテキストをそれぞれアップロード＆保存して更新できます。")
+
+    sub_tab1, sub_tab2 = st.tabs(["🏆 G1専用ルールの設定", "🏇 平場・G2・G3専用ルールの設定"])
+
+    with sub_tab1:
+        st.markdown("#### 🏆 G1専用ルールのアップロード ＆ 保存")
+        col_g1_1, col_g1_2 = st.columns([2, 1])
+
+        with col_g1_1:
+            up_g1 = st.file_uploader("G1用ルールテキスト (.txt)", type=["txt"], key="up_g1_file")
+            if up_g1 is not None:
+                if st.button("📥 アップロードしたテキストを画面に読み込む", key="btn_load_g1"):
+                    st.session_state["g1_text_val"] = up_g1.read().decode("utf-8", errors="ignore")
+                    st.rerun()
+
+        with col_g1_2:
+            if st.button("🔄 G1初期ルールに戻す", key="btn_g1_def"):
+                st.session_state["g1_text_val"] = DEFAULT_G1_RULES
+                save_rules_to_file(RULE_G1_FILE, DEFAULT_G1_RULES)
+                st.rerun()
+
+        st.text_area("G1専用ルールテキスト（直接編集可能）", height=300, key="g1_text_val")
+
+        if st.button("💾 G1専用ルールとして更新・保存する", use_container_width=True, key="save_g1_btn"):
+            rule_content = st.session_state["g1_text_val"]
+            if rule_content.strip():
+                save_rules_to_file(RULE_G1_FILE, rule_content)
+                st.success("🎉 G1専用ルールをファイルに更新・保存しました！次回からも自動適用されます！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    with sub_tab2:
+        st.markdown("#### 🏇 平場・G2・G3専用ルールのアップロード ＆ 保存")
+        col_gen_1, col_gen_2 = st.columns([2, 1])
+
+        with col_gen_1:
+            up_gen = st.file_uploader("平場・G2・G3用ルールテキスト (.txt)", type=["txt"], key="up_gen_file")
+            if up_gen is not None:
+                if st.button("📥 アップロードしたテキストを画面に読み込む", key="btn_load_gen"):
+                    st.session_state["gen_text_val"] = up_gen.read().decode("utf-8", errors="ignore")
+                    st.rerun()
+
+        with col_gen_2:
+            if st.button("🔄 平場・G2・G3初期ルールに戻す", key="btn_gen_def"):
+                st.session_state["gen_text_val"] = DEFAULT_GENERAL_RULES
+                save_rules_to_file(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+                st.rerun()
+
+        st.text_area("平場・G2・G3専用ルールテキスト（直接編集可能）", height=300, key="gen_text_val")
+
+        if st.button("💾 平場・G2・G3専用ルールとして更新・保存する", use_container_width=True, key="save_gen_btn"):
+            rule_content = st.session_state["gen_text_val"]
+            if rule_content.strip():
+                save_rules_to_file(RULE_GENERAL_FILE, rule_content)
+                st.success("🎉 平場・G2・G3専用ルールをファイルに更新・保存しました！次回からも自動適用されます！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+# --------------------------------------------------
+# 3. 🔄 回顧・精度検証
+# --------------------------------------------------
+elif selected_menu == "🔄 回顧・精度検証":
+    st.subheader("🔄 レース後回顧 ＆ 全着順自動照合 ＆ ルール自動検証")
+    st.write("レース後の確定結果を入力すると、全着順の自動照合・回顧レポート作成に加え、**現行評価ルールの改修が必要かをAIが判定し、必要ならフォーマットを一切崩さずに修正版テキストを出力**します！")
+
+    db_df = load_db()
+
+    if db_df.empty:
+        st.info("💡 過去馬データベースに予想データがありません。まず「📋 レース分析・予想」メニューでレース分析を実行してください！")
+    else:
+        races_in_db = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+        selected_race = st.selectbox("🎯 回顧対象のレースを選択してください", races_in_db)
+
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            res_text_input = st.text_area("1. 結果テキストのコピペ（netkeiba/JRA結果画面等）", height=180)
+        with col_r2:
+            res_file_input = st.file_uploader("2. 結果ファイル (.txt / .pdf / .png / .jpg)", type=["txt", "pdf", "png", "jpg", "jpeg"])
+
+        if st.button("🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True):
+            if not api_key:
+                st.error("⚠️ サイドバーの「⚙️ システム設定」を展開し、Gemini API Keyを入力してください！")
+            elif not res_text_input and not res_file_input:
+                st.warning("⚠️ 結果テキストのコピペまたはファイルを読み込ませてください！")
+            else:
+                with st.spinner("🏇 AIが全着順を照合・回顧し、評価ルールの見直し要否を検証中..."):
+                    try:
+                        raw_result = res_text_input if res_text_input else ""
+                        if res_file_input:
+                            if res_file_input.name.lower().endswith(".pdf"):
+                                raw_result += "\n" + extract_text_from_pdf(res_file_input, page_option="全ページ")
+                            elif res_file_input.name.lower().endswith(".txt"):
+                                raw_result += "\n" + res_file_input.read().decode("utf-8", errors="ignore")
+
+                        target_df = db_df[db_df["レース名"].astype(str) == str(selected_race)]
+
+                        cols = [c for c in ["馬番", "馬名", "総合スコア", "評価", "軸", "ヒモ", "切り", "メモ"] if c in target_df.columns]
+                        predict_summary = target_df[cols].to_string(index=False)
+
+                        # レース種別に応じて現在適用中のルールを自動読み込み
+                        is_g1_race = "G1" in selected_race or "Ｇ１" in selected_race
+                        current_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES) if is_g1_race else load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+
+                        prompt = f"""あなたは競馬予想プロフェッショナル「AI」です。
+以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ」を突き合わせ、全着順テーブル、回顧レポート、および【ルール改修案の自動判定】を行ってください。
+
+【予想データ】
+{predict_summary}
+
+【現在適用中の評価ルール】
+{current_rule}
+
+【実際のレース結果データ】
+{raw_result}
+
+【出力フォーマット要求】
+1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：
+
+確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t軸ヒモ切り\t勝因・敗因ショートメモ
+
+2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に回顧コメント（予想の勝因・敗因・反省と今後の注目馬）を出力してください。
+
+3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、今回のレース結果を受けて評価ルールの微修正・見直しが必要と判断した場合のみ、【現在適用中の評価ルール】のフォーマットや項目構造を1文字も崩さずに、改修を加えた「最新ルール全文テキスト」を出力してください。
+※もしルール改修が不要（現状維持で問題なし）と判断した場合は、「【ルール変更なし】現行ロジックのままで問題ありません。」とだけ出力してください。
+"""
+                        client = genai.Client(api_key=api_key)
+                        
+                        contents_list = [prompt]
+                        if res_file_input and res_file_input.name.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+                            res_file_input.seek(0)
+                            contents_list.append(types.Part.from_bytes(data=res_file_input.read(), mime_type=res_file_input.type))
+
+                        response = client.models.generate_content(
+                            model=selected_model,
+                            contents=contents_list
+                        )
+                        ai_res_out = response.text
+
+                        # 3ブロック（テーブル / 回顧メモ / ルール改修案）の分割処理
+                        tbl_part = ai_res_out
+                        memo_part = "回顧コメントの抽出を完了しました。"
+                        rule_update_part = "【ルール変更なし】現行ロジックのままで問題ありません。"
+
+                        if "---RESULT_MEMO---" in ai_res_out:
+                            tbl_part, rest_part = ai_res_out.split("---RESULT_MEMO---", 1)
+                            if "---RULE_UPDATE---" in rest_part:
+                                memo_part, rule_update_part = rest_part.split("---RULE_UPDATE---", 1)
+                            else:
+                                memo_part = rest_part
+                        elif "---RULE_UPDATE---" in ai_res_out:
+                            tbl_part, rule_update_part = ai_res_out.split("---RULE_UPDATE---", 1)
+
+                        clean_tbl = tbl_part.replace("```tsv", "").replace("```", "").strip()
+                        res_df = pd.read_csv(io.StringIO(clean_tbl), sep="\t", on_bad_lines="skip")
+
+                        def highlight_ranks(row):
+                            rank_str = str(row.get("確定着順", ""))
+                            if rank_str in ["1", "1着"]:
+                                return ['background-color: #4a3b00; color: #ffd700; font-weight: bold;'] * len(row)
+                            elif rank_str in ["2", "2着"]:
+                                return ['background-color: #223344; color: #00ffff; font-weight: bold;'] * len(row)
+                            elif rank_str in ["3", "3着"]:
+                                return ['background-color: #332211; color: #ffaa55; font-weight: bold;'] * len(row)
+                            return [''] * len(row)
+
+                        st.success(f"🎉 レース「{selected_race}」の全着順照合 ＆ 回顧 ＆ ルール検証が完了しました！")
+
+                        st.subheader("🏆 全着順 ＆ 予想照合結果")
+                        st.dataframe(
+                            res_df.style.hide(axis='index').apply(highlight_ranks, axis=1),
+                            use_container_width=True,
+                            height=450,
+                            hide_index=True
+                        )
+
+                        st.subheader("📝 回顧 ＆ 今後の注目馬メモ")
+                        st.info(memo_part.strip())
+
+                        st.subheader("⚙️ 評価ルールの見直し・改修結果")
+                        rule_update_clean = rule_update_part.strip()
+                        if "【ルール変更なし】" in rule_update_clean:
+                            st.success("✅ 今回のレース検証結果：現行ルール・ロジックのままで問題ありません（現状維持）。")
+                        else:
+                            st.warning("⚠️ 今回の検証によりルール改修案が提案されました！フォーマット維持された修正文面です：")
+                            st.text_area("提案された改修ルールテキスト（丸ごとコピーして「⚙️ ルール管理・アップデート」メニューで保存可能）", value=rule_update_clean, height=300)
+
+                    except Exception as e:
+                        st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
+
+# --------------------------------------------------
+# 4. 🗄 過去馬データベース（プール）
+# --------------------------------------------------
+elif selected_menu == "🗄 過去馬データベース（プール）":
+    st.subheader("🗄️ 過去馬データベース（プール一覧・評価順）")
+    db_df = load_db()
+
+    if not db_df.empty:
+        st.success(f"📦 現在 {len(db_df)} 件の解析馬データがプールされています")
+
+        with st.expander("🛠 データベースの削除・整理メニュー（ここをクリックして展開）", expanded=True):
+            col_del_1, col_del_2 = st.columns(2)
+
+            with col_del_1:
+                st.markdown("##### 📌 特定のレースデータを削除")
+                races_list = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+                selected_race_to_del = st.selectbox("削除するレースを選択してください", races_list)
+                if st.button("🗑️ 選択したレースを削除する", key="btn_del_race"):
+                    if selected_race_to_del:
+                        delete_race_from_db(selected_race_to_del)
+                        st.success(f"✅ レース「{selected_race_to_del}」のデータを削除しました！")
+                        st.rerun()
+
+            with col_del_2:
+                st.markdown("##### 💣 全件一括削除（テストデータ等のリセット）")
+                confirm_clear = st.checkbox("本当にすべてのデータを一括削除します（元に戻せません）", key="chk_confirm_clear")
+                if st.button("💥 データベースを全件クリアする", key="btn_clear_all"):
+                    if confirm_clear:
+                        clear_db()
+                        st.success("💥 データベースを全件削除し、完全リセットしました！")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 誤操作防止のため, 上のチェックボックスにチェックを入れてから押してください。")
+
+        st.divider()
+
+        st.subheader("🔗 レース別の知人共有用パラメータ")
+        races_list_all = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+        share_race = st.selectbox("共有URLを発行したいレースを選択", races_list_all, key="share_race_select")
+        if share_race:
+            st.code(f"?race={share_race}", language="text")
+            st.caption("※Web公開後、アプリのURLの末尾に上記パラメータを追加して知人に送ると、該当レースの閲覧専用画面が開きます！")
+
+        st.divider()
+
+        db_col_config = {
+            "総合スコア": st.column_config.ProgressColumn(
+                "総合スコア", format="%d点", min_value=0, max_value=100
+            )
+        }
+
+        search_race = st.text_input("🔍 レース名で検索", "")
+        if search_race:
+            filtered_df = db_df[db_df["レース名"].astype(str).str.contains(search_race, na=False)]
+            st.dataframe(filtered_df, column_config=db_col_config, use_container_width=False, height=500, hide_index=True)
+        else:
+            st.dataframe(db_df, column_config=db_col_config, use_container_width=False, height=500, hide_index=True)
+
+        csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button(
+            label="📥 データベースをCSVでダウンロード",
+            data=csv_data,
+            file_name="race_all_database.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("💡 まだプールされたデータはありません。「📋 レース分析・予想」メニューで解析を実行するとここに蓄積されます！")
