@@ -533,8 +533,8 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 
         st.write("")
 
-        # 🌟 2. 本命・穴馬カード（左） / 順位一覧テーブル（右） ── 比率を 1 : 2.5 に変更し広大化
-        col_left, col_right = st.columns([1, 2.5])
+        # 🌟 2. 本命・穴馬カード（左） / 順位一覧テーブル（右）
+        col_left, col_right = st.columns([1, 1.8])
 
         with col_left:
             if honmei_horse is not None:
@@ -581,27 +581,33 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         with col_right:
             st.subheader("📊 総合評価順位一覧")
 
-            sub_cols = [c for c in ["馬番", "馬名", "予想人気", "総合スコア", "評価", "軸"] if c in view_df.columns]
+            # 軸列を除外し、以前の表示項目に復元
+            sub_cols = [c for c in ["馬番", "馬名", "予想人気", "総合スコア"] if c in view_df.columns]
             disp_df = view_df[sub_cols].copy()
             if "馬番" in disp_df.columns:
                 disp_df["馬番"] = pd.to_numeric(disp_df["馬番"], errors='coerce').fillna(0).astype(int)
             if "総合スコア" in disp_df.columns:
                 disp_df["総合スコア"] = pd.to_numeric(disp_df["総合スコア"], errors='coerce').fillna(0).astype(int)
 
-            disp_df = disp_df.rename(columns={
-                "総合スコア": "指数合計",
-                "予想人気": "想定人気"
-            })
+            # 🟢 指数合計に数値バー（ProgressColumn）を復活設定！
+            col_config_sum = {
+                "馬番": st.column_config.NumberColumn("馬番", width="small"),
+                "馬名": st.column_config.TextColumn("馬名", width="medium"),
+                "予想人気": st.column_config.TextColumn("予想人気", width="small"),
+                "総合スコア": st.column_config.ProgressColumn(
+                    "指数合計値", format="%d点", min_value=0, max_value=100
+                )
+            }
 
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
-            st.table(top_group)
+            st.dataframe(top_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
 
             if not sub_group.empty:
                 st.write("🟡 **相手紐・穴馬グループ**")
-                st.table(sub_group)
+                st.dataframe(sub_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -674,12 +680,6 @@ st.markdown("""
 
     .main { background-color: #080a0f; }
     h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
-
-    /* テーブルの文字色・見やすさ調整 */
-    div[data-testid="stTable"] table {
-        width: 100% !important;
-        font-size: 0.95rem !important;
-    }
 
     div[data-testid="stDataFrame"] div[role="progressbar"] {
         height: 14px !important;
@@ -1010,7 +1010,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.7")
+st.title("🏇 ウマエル自動解析システム v1.8")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
@@ -1218,7 +1218,6 @@ if selected_menu == "📋 レース分析・予想":
                                     if target_draft:
                                         delete_draft(target_draft)
                                     
-                                    # カラム内部ではなくセッションに保持してメイン階層で描画！
                                     st.session_state["analyzed_df"] = df
                                     st.session_state["analysis_success_msg"] = f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！"
                                     st.rerun()
@@ -1276,7 +1275,7 @@ if selected_menu == "📋 レース分析・予想":
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました:\n{e}")
 
-    # 🚀 カラム枠（Column 2）の外側＝白枠メインエリア最外枠で描画！
+    # メイン階層描画エリア
     if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
         st.divider()
         if "analysis_success_msg" in st.session_state and st.session_state["analysis_success_msg"]:
