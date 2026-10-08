@@ -533,8 +533,8 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 
         st.write("")
 
-        # 🌟 2. 本命・穴馬カード（左） / 順位一覧テーブル（右） ── 比率を 1 : 2.2 に変更して広大化
-        col_left, col_right = st.columns([1, 2.2])
+        # 🌟 2. 本命・穴馬カード（左） / 順位一覧テーブル（右） ── 比率を 1 : 2.5 に変更し広大化
+        col_left, col_right = st.columns([1, 2.5])
 
         with col_left:
             if honmei_horse is not None:
@@ -588,7 +588,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             if "総合スコア" in disp_df.columns:
                 disp_df["総合スコア"] = pd.to_numeric(disp_df["総合スコア"], errors='coerce').fillna(0).astype(int)
 
-            # 表の列名を分かりやすく
             disp_df = disp_df.rename(columns={
                 "総合スコア": "指数合計",
                 "予想人気": "想定人気"
@@ -597,7 +596,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
-            # 🌟 スクロールバーが一切出ない st.table で全体を一発表示！
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
             st.table(top_group)
 
@@ -1012,7 +1010,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.6")
+st.title("🏇 ウマエル自動解析システム v1.7")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
@@ -1173,6 +1171,7 @@ if selected_menu == "📋 レース分析・予想":
                     target_name = draft_race_name if (draft_race_name and draft_race_name.strip() and draft_choice != "✨ 【新規レース作成（馬柱からレース名自動判別）】") else ""
                     saved_c, actual_draft_name = save_draft_data(target_name, files_group1, files_group2, files_group3, urls_group4_input)
                     st.success(f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を蓄積保存しました！")
+                    st.session_state.pop("analyzed_df", None)
                     st.rerun()
 
         with btn_col2:
@@ -1219,8 +1218,10 @@ if selected_menu == "📋 レース分析・予想":
                                     if target_draft:
                                         delete_draft(target_draft)
                                     
-                                    st.success(f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！")
-                                    render_race_evaluation_view(df, is_viewer_mode=False)
+                                    # カラム内部ではなくセッションに保持してメイン階層で描画！
+                                    st.session_state["analyzed_df"] = df
+                                    st.session_state["analysis_success_msg"] = f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！"
+                                    st.rerun()
                                 else:
                                     st.error("⚠️ 解析結果から出走馬データを抽出できませんでした。")
                             except Exception as e:
@@ -1231,6 +1232,7 @@ if selected_menu == "📋 レース分析・予想":
                 if draft_race_name and draft_race_name not in ["✨ 【新規レース作成（馬柱からレース名自動判別）】", ""]:
                     delete_draft(draft_race_name)
                     st.success(f"🗑️ レース「{draft_race_name}」の下書きデータを削除しました！")
+                    st.session_state.pop("analyzed_df", None)
                     st.rerun()
 
     else:
@@ -1263,14 +1265,23 @@ if selected_menu == "📋 レース分析・予想":
                             df = df.sort_values(by="総合スコア", ascending=False).reset_index(drop=True)
 
                             auto_race_title = df["レース名"].iloc[0] if "レース名" in df.columns else "レース解析"
-                            st.success(f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！")
                             save_to_db(df)
-                            render_race_evaluation_view(df, is_viewer_mode=False)
+                            
+                            st.session_state["analyzed_df"] = df
+                            st.session_state["analysis_success_msg"] = f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！"
+                            st.rerun()
                         else:
                             st.error("⚠️ アップロードされたデータから出走馬を検出できませんでした。")
 
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました:\n{e}")
+
+    # 🚀 カラム枠（Column 2）の外側＝白枠メインエリア最外枠で描画！
+    if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
+        st.divider()
+        if "analysis_success_msg" in st.session_state and st.session_state["analysis_success_msg"]:
+            st.success(st.session_state["analysis_success_msg"])
+        render_race_evaluation_view(st.session_state["analyzed_df"], is_viewer_mode=False)
 
 # --------------------------------------------------
 # 2. ⚙️ ルール管理・アップデート
