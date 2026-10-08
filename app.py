@@ -606,7 +606,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 
         st.divider()
 
-        # 🌟 3. 【最重要改修】買い目の直上に「🏁 レース質 ＆ 展開予想シミュレーション」を表示！
+        # 🌟 3. 買い目の直上に「🏁 レース質 ＆ 展開予想シミュレーション」を表示
         if "レース質展開予想" in df.columns and str(df["レース質展開予想"].iloc[0]).strip():
             tenkai_text = str(df["レース質展開予想"].iloc[0]).strip()
             st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
@@ -652,12 +652,20 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large")
         }
 
-        st.dataframe(view_df, column_config=col_config_detail, use_container_width=False, height=520, hide_index=True)
+        st.dataframe(view_df, column_config=col_config_detail, use_container_width=True, height=520, hide_index=True)
 
 
 # カスタムCSS
 st.markdown("""
 <style>
+    /* 🚀 メインコンテナの幅制限を完全解除して画面いっぱいに広げる（ウマエル全画面モード） */
+    .block-container, div[data-testid="stMainBlockContainer"] {
+        max-width: 98% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+        padding-top: 1.5rem !important;
+    }
+
     .main { background-color: #080a0f; }
     h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
 
@@ -979,7 +987,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.4")
+st.title("🏇 ウマエル自動解析システム v1.5")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
@@ -1510,9 +1518,9 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         search_race = st.text_input("🔍 レース名で検索", "")
         if search_race:
             filtered_df = db_df[db_df["レース名"].astype(str).str.contains(search_race, na=False)]
-            st.dataframe(filtered_df, column_config=db_col_config, use_container_width=False, height=500, hide_index=True)
+            st.dataframe(filtered_df, column_config=db_col_config, use_container_width=True, height=500, hide_index=True)
         else:
-            st.dataframe(db_df, column_config=db_col_config, use_container_width=False, height=500, hide_index=True)
+            st.dataframe(db_df, column_config=db_col_config, use_container_width=True, height=500, hide_index=True)
 
         csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button(
