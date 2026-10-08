@@ -1238,6 +1238,7 @@ def analyze_data_with_gemini(
 【最重要遵守事項】
 ・確定出馬表にある1番〜最終馬番まで絶対に途中で切らず【全頭】出力すること。
 ・解説文章や挨拶は一切含めず、純粋なJSONのみを出力すること。
+・同じ入力データに対しては、常に同一の厳格なロジックで一貫したスコアを算出すること。
 """
 
   contents_payload = [json_prompt]
@@ -1254,6 +1255,7 @@ def analyze_data_with_gemini(
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
               temperature=0.0,
+              seed=42,  # 🔒 乱数シードを42に固定して出力を再現可能に！
           ),
       )
       return response.text
@@ -1276,7 +1278,7 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("🏇 ウマエル自動解析システム v2.5")
+st.title("🏇 ウマエル自動解析システム v2.6")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
@@ -1988,7 +1990,9 @@ elif selected_menu == "🔄 回顧・精度検証":
             response = client.models.generate_content(
                 model=selected_model,
                 contents=contents_list,
-                config=types.GenerateContentConfig(temperature=0.0),
+                config=types.GenerateContentConfig(
+                    temperature=0.0, seed=42
+                ),
             )
             ai_res_out = response.text
 
