@@ -49,29 +49,13 @@ def detect_simple_race_name(files_g1, files_g2, files_g3):
                 f.seek(0)
                 fname = f.name
                 text_corpus += " " + fname
-                if fname.lower().endswith(".txt"):
-                    text_corpus += " " + f.read().decode("utf-8", errors="ignore")[:500]
                 f.seek(0)
     
-    # 日付の抽出試行 (例: 20261007 or 2026年10月7日)
-    date_match = re.search(r'202\d[01]\d[0-3]\d', text_corpus)
-    date_str = date_match.group(0) if date_match else ""
-    if not date_str:
-        m2 = re.search(r'(202\d)年(\d{1,2})月(\d{1,2})日', text_corpus)
-        if m2:
-            date_str = f"{m2.group(1)}{int(m2.group(2)):02d}{int(m2.group(3)):02d}"
-            
-    if not date_str:
-        date_str = time.strftime("%Y%m%d")
-
-    # キーワード抽出
-    race_keyword = "準備中レース"
-    for kw in ["ジャパンダートクラシック", "秋華賞", "菊花賞", "天皇賞", "有馬記念", "宝塚記念", "ダービー", "オークス", "スプリンターズＳ", "マイルＣＳ"]:
-        if kw in text_corpus:
-            race_keyword = kw
-            break
-            
-    return f"{date_str}_{race_keyword}_自動保存"
+    # ファイル名から単語を抽出して仮フォルダ名を生成
+    found = re.findall(r'[a-zA-Z0-9一-龠ぁ-ゔァ-ヴー]+', text_corpus)
+    short_label = "_".join(found[:2]) if found else "準備中レース"
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    return f"{short_label}_{timestamp}"
 
 def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text):
     ensure_drafts_dir()
@@ -110,6 +94,9 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text):
 
 def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
     ensure_drafts_dir()
+    if not race_name or not race_name.strip():
+        return "", [], "", [], "", [], "", []
+        
     sanitized_name = re.sub(r'[\\/*?:"<>|]', '_', race_name.strip())
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
     
@@ -183,6 +170,8 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
 
 def delete_draft(race_name):
     ensure_drafts_dir()
+    if not race_name or not race_name.strip():
+        return False
     sanitized_name = re.sub(r'[\\/*?:"<>|]', '_', race_name.strip())
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
     if os.path.exists(race_dir):
@@ -262,7 +251,7 @@ def fetch_text_from_url(url):
             clean_text = '\n'.join(chunk for chunk in chunks if chunk)
             return f"【Webページ抽出テキスト ({url})】:\n" + clean_text[:8000]
         except Exception:
-            clean_html = re.sub(r'<script.*?>.*.*?/script>', '', html, flags=re.DOTALL)
+            clean_html = re.sub(r'<script.*?>.*?</script>', '', html, flags=re.DOTALL)
             clean_html = re.sub(r'<style.*?>.*?</style>', '', clean_html, flags=re.DOTALL)
             clean_html = re.sub(r'<[^>]+>', ' ', clean_html)
             clean_text = re.sub(r'\s+', ' ', clean_html).strip()
@@ -966,7 +955,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.2")
+st.title("🏇 ウマエル自動解析システム v1.3")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
@@ -1042,8 +1031,10 @@ if selected_menu == "📋 レース分析・予想":
     )
 
     draft_race_name = ""
+    draft_choice = ""
+    existing_drafts = list_draft_races()
+    
     if "段階的" in upload_mode:
-        existing_drafts = list_draft_races()
         draft_col1, draft_col2 = st.columns([1.5, 1])
         
         with draft_col1:
@@ -1052,7 +1043,7 @@ if selected_menu == "📋 レース分析・予想":
                 ["✨ 【新規レース作成（馬柱からレース名自動判別）】"] + existing_drafts
             )
             if draft_choice == "✨ 【新規レース作成（馬柱からレース名自動判別）】":
-                draft_race_name = st.text_input("レース名を入力（※空欄の場合、ファイル内容から自動命名します）", "")
+                draft_race_name = st.text_input("レース名を入力（※空欄でもアップロードファイルから自動設定されます）", "")
             else:
                 draft_race_name = draft_choice
                 
@@ -1122,7 +1113,8 @@ if selected_menu == "📋 レース分析・予想":
                 if not files_group1 and not files_group2 and not files_group3 and not urls_group4_input.strip():
                     st.warning("⚠️ 追加保存するファイルまたはURLを入力してください！")
                 else:
-                    saved_c, actual_draft_name = save_draft_data(draft_race_name, files_group1, files_group2, files_group3, urls_group4_input)
+                    target_name = draft_race_name if (draft_race_name and draft_race_name.strip() and draft_choice != "✨ 【新規レース作成（馬柱からレース名自動判別）】") else ""
+                    saved_c, actual_draft_name = save_draft_data(target_name, files_group1, files_group2, files_group3, urls_group4_input)
                     st.success(f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を蓄積保存しました！")
                     st.rerun()
 
@@ -1130,12 +1122,11 @@ if selected_menu == "📋 レース分析・予想":
             if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True):
                 if not api_key:
                     st.error("⚠️ サイドバーで Gemini API Key を設定してください！")
-                elif not draft_race_name.strip() and not existing_drafts:
-                    st.error("⚠️ 解析する対象のレースを選択してください！")
                 else:
                     pdf_opt_val = "1ページ目のみ" if "1ページ目のみ" in pdf_page_opt else "全ページ"
                     
-                    dt1, dp1, dt2, dp2, dt3, dp3, dt4, _ = load_draft_data(draft_race_name, pdf_page_option=pdf_opt_val)
+                    target_draft = draft_race_name if (draft_race_name and draft_choice != "✨ 【新規レース作成（馬柱からレース名自動判別）】") else ""
+                    dt1, dp1, dt2, dp2, dt3, dp3, dt4, _ = load_draft_data(target_draft, pdf_page_option=pdf_opt_val) if target_draft else ("", [], "", [], "", [], "", [])
                     
                     nt1, np1 = prepare_file_parts(files_group1, pdf_page_option=pdf_opt_val)
                     nt2, np2 = prepare_file_parts(files_group2, pdf_page_option=pdf_opt_val)
@@ -1151,9 +1142,9 @@ if selected_menu == "📋 レース分析・予想":
                     comb_t4 = dt4 + "\n" + nt4
                     
                     if not comb_t1.strip() and not comb_t2.strip() and not comb_t3.strip() and not comb_p1 and not comb_p2 and not comb_p3:
-                        st.warning("⚠️ 蓄積されたデータが見つかりません。データを保存してから実行してください。")
+                        st.warning("⚠️ 解析対象のデータが見つかりません。ファイルをアップロードするか、下書きデータを保存してください。")
                     else:
-                        with st.spinner("🏇 馬柱・出馬表からレース名を自動取得しつつ、蓄積データで一括AI解析中..."):
+                        with st.spinner("🏇 馬柱・出馬表からレース名を自動取得しつつ、全データでAI一括解析中..."):
                             try:
                                 result_text = analyze_data_with_gemini(
                                     api_key, active_selected_rule,
@@ -1165,11 +1156,11 @@ if selected_menu == "📋 レース分析・予想":
                                     df["総合スコア"] = pd.to_numeric(df["総合スコア"], errors='coerce').fillna(0).astype(int)
                                     df = df.sort_values(by="総合スコア", ascending=False).reset_index(drop=True)
 
-                                    auto_race_title = df["レース名"].iloc[0] if "レース名" in df.columns else draft_race_name
+                                    auto_race_title = df["レース名"].iloc[0] if "レース名" in df.columns else "20261008_競馬解析_OP"
                                     save_to_db(df)
                                     
-                                    # 解析完了したら下書きフォルダを整理・削除
-                                    delete_draft(draft_race_name)
+                                    if target_draft:
+                                        delete_draft(target_draft)
                                     
                                     st.success(f"🎉 【{auto_race_title}】の自動解析が完了し、データベースに保存されました！")
                                     render_race_evaluation_view(df, is_viewer_mode=False)
@@ -1193,7 +1184,7 @@ if selected_menu == "📋 レース分析・予想":
             elif not files_group1 and not files_group2 and not files_group3 and not urls_group4_input.strip():
                 st.warning("⚠️ 解析するデータファイルまたはURLを1つ以上入力してください！")
             else:
-                with st.spinner(f"🏇 馬柱からレース名（YYYYMMDD_レース名_グレード）を自動取得して解析中..."):
+                with st.spinner("🏇 馬柱からレース名（YYYYMMDD_レース名_グレード）を自動取得して解析中..."):
                     try:
                         pdf_opt_val = "1ページ目のみ" if "1ページ目のみ" in pdf_page_opt else "全ページ"
 
