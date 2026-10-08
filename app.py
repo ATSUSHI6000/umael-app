@@ -365,7 +365,7 @@ DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール（
 ■ 5. 表記・プロ評価統合ルール
 ■ 6. 【出力順序絶対規定】＆ 解析サイト蓄積用（20列TSV）フォーマット
 1. 🏁 レース質 ＆ 展開予想シミュレーション
-2. 💰 推奨券種＆資金配分（指示時のみ）
+2. 💰 推奨買い目＆資金配分（指示時のみ）
 3. 📊 ウマエル解析サイト蓄積用データ（20列TSV）
 ■ 7. レース解析冒頭フォーマット
 ■ 8. 各評価点計算式
@@ -570,28 +570,31 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
     else:
       risk_level = "★★★ (大波乱混戦)"
 
-  # 🎯 注目波乱馬判定ロジック（本命1位を除外＆人気と評価順のギャップから浮上馬を自動選出）
+  # 🎯 注目波乱馬（縦横比較で『予想人気に対して評価が一番高い馬』を自動選出）
   df_copy = view_df.copy()
-  other_horses = df_copy.iloc[1:] if len(df_copy) > 1 else pd.DataFrame()
+  other_horses = df_copy.iloc[1:].copy() if len(df_copy) > 1 else pd.DataFrame()
 
   if not other_horses.empty:
-    best_candidate = None
-    max_gap = -999
+    # 予想人気を数値化
+    other_horses["pop_num"] = (
+        pd.to_numeric(other_horses["予想人気"], errors="coerce")
+        .fillna(99)
+        .astype(int)
+    )
+    # 評価順位（本命除外なので2位〜）
+    other_horses["eval_rank"] = range(2, len(other_horses) + 2)
 
-    # 本命(1位)以外の馬から、想定人気より指数順位が勝っている（乖離が大きい）馬を探索
-    for rank_offset, (idx, row) in enumerate(other_horses.iterrows(), start=2):
-      pop_num = safe_int(row.get("予想人気", 0))
-      # 想定人気数字 - 評価順位（例：5人気なのに評価2位 ＝ 5 - 2 = +3）
-      gap = (pop_num - rank_offset) if pop_num > 0 else -100
-      if gap > max_gap:
-        max_gap = gap
-        best_candidate = row
+    # ギャップ値（予想人気順位 - 評価順位）の算出
+    # 例：10人気で評価4位なら 10 - 4 = +6 （最も評価が跳ね上がっている）
+    other_horses["gap"] = (
+        other_horses["pop_num"] - other_horses["eval_rank"]
+    )
 
-    if best_candidate is not None and max_gap > 0:
-      ana_horse = best_candidate
-    else:
-      # 特に乖離が見られない場合は、シンプルに総合評価2位の馬をアサイン
-      ana_horse = other_horses.iloc[0]
+    # gapが最も大きい馬を選出。ギャップが同点ならeval_rankが上の馬（総合スコアが高い馬）を優先
+    best_ana = other_horses.sort_values(
+        by=["gap", "eval_rank"], ascending=[False, True]
+    ).iloc[0]
+    ana_horse = best_ana
   else:
     ana_horse = honmei_horse
 
@@ -1249,7 +1252,7 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("🏇 ウマエル自動解析システム v2.1")
+st.title("🏇 ウマエル自動解析システム v2.3")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
