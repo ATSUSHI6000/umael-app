@@ -570,7 +570,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
     else:
       risk_level = "★★★ (大波乱混戦)"
 
-  # 🎯 注目波乱馬（縦横比較で『予想人気に対して評価が一番高い馬』を自動選出）
+  # 🎯 注目波乱馬（【指数75点以上】かつ【C評価除外（B評価以上）】の馬から選出）
   df_copy = view_df.copy()
   other_horses = df_copy.iloc[1:].copy() if len(df_copy) > 1 else pd.DataFrame()
 
@@ -581,20 +581,44 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         .fillna(99)
         .astype(int)
     )
+    # 総合スコア（指数）を数値化
+    other_horses["score_num"] = (
+        pd.to_numeric(other_horses["総合スコア"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    # 評価ランク文字列の標準化
+    other_horses["eval_clean"] = (
+        other_horses["評価"].astype(str).str.strip().str.upper()
+    )
     # 評価順位（本命除外なので2位〜）
     other_horses["eval_rank"] = range(2, len(other_horses) + 2)
 
     # ギャップ値（予想人気順位 - 評価順位）の算出
-    # 例：10人気で評価4位なら 10 - 4 = +6 （最も評価が跳ね上がっている）
     other_horses["gap"] = (
         other_horses["pop_num"] - other_horses["eval_rank"]
     )
 
-    # gapが最も大きい馬を選出。ギャップが同点ならeval_rankが上の馬（総合スコアが高い馬）を優先
-    best_ana = other_horses.sort_values(
-        by=["gap", "eval_rank"], ascending=[False, True]
-    ).iloc[0]
-    ana_horse = best_ana
+    # 🔥 【条件】指数75点以上 ＆ C評価以外の馬（B評価以上）に限定
+    ana_filtered = other_horses[
+        (other_horses["score_num"] >= 75) & (other_horses["eval_clean"] != "C")
+    ]
+
+    if not ana_filtered.empty:
+      # 条件を満たす中でgapが最も大きい馬を選出（同点なら評価上位・高スコア優先）
+      best_ana = ana_filtered.sort_values(
+          by=["gap", "eval_rank"], ascending=[False, True]
+      ).iloc[0]
+      ana_horse = best_ana
+    else:
+      # 条件を満たす馬がいない場合、C評価以外の馬の中でギャップ最大の馬をフォールバック
+      non_c_horses = other_horses[other_horses["eval_clean"] != "C"]
+      if not non_c_horses.empty:
+        ana_horse = non_c_horses.sort_values(
+            by=["gap", "eval_rank"], ascending=[False, True]
+        ).iloc[0]
+      else:
+        ana_horse = other_horses.iloc[0]
   else:
     ana_horse = honmei_horse
 
@@ -1252,7 +1276,7 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("🏇 ウマエル自動解析システム v2.3")
+st.title("🏇 ウマエル自動解析システム v2.5")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
