@@ -51,7 +51,6 @@ def detect_simple_race_name(files_g1, files_g2, files_g3):
                 text_corpus += " " + fname
                 f.seek(0)
     
-    # ファイル名から単語を抽出して仮フォルダ名を生成
     found = re.findall(r'[a-zA-Z0-9一-龠ぁ-ゔァ-ヴー]+', text_corpus)
     short_label = "_".join(found[:2]) if found else "準備中レース"
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -369,6 +368,7 @@ def parse_json_ai_output(result_text):
     race_title = "20261008_競馬解析_OP"
     confidence = ""
     risk_level = ""
+    race_quality_and_tenkai = ""
     recommended_tickets = []
 
     try:
@@ -382,6 +382,7 @@ def parse_json_ai_output(result_text):
         race_title = data.get("race_name", "20261008_競馬解析_OP")
         confidence = data.get("confidence", "")
         risk_level = data.get("risk_level", "")
+        race_quality_and_tenkai = data.get("race_quality_and_tenkai", "")
         recommended_tickets = data.get("recommended_tickets", [])
 
         horses = data.get("horses", [])
@@ -440,6 +441,8 @@ def parse_json_ai_output(result_text):
         df["信頼度"] = confidence
     if risk_level:
         df["波乱度"] = risk_level
+    if race_quality_and_tenkai:
+        df["レース質展開予想"] = race_quality_and_tenkai
     if recommended_tickets:
         df["推奨買い目"] = json.dumps(recommended_tickets, ensure_ascii=False)
 
@@ -452,7 +455,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         return
 
     race_title = df["レース名"].iloc[0] if "レース名" in df.columns and not df.empty else "競馬予想解析"
-    view_df = df.drop(columns=["レース名", "信頼度", "波乱度", "推奨買い目"], errors='ignore')
+    view_df = df.drop(columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目"], errors='ignore')
 
     honmei_horse = view_df.iloc[0] if not view_df.empty else None
     h_score = safe_int(honmei_horse.get("総合スコア", 0)) if honmei_horse is not None else 0
@@ -511,25 +514,29 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         st.markdown(f"<h2 style='text-align: center; color: #f39c12;'>🏇 {race_title} 🏇</h2>", unsafe_allow_html=True)
         st.write("")
 
-        col_left, col_right = st.columns([1, 1.3])
-
-        with col_left:
-            st.markdown(f"""
-            <div class="risk-card">
-                <div class="card-title">🔥 レース展開 ＆ 波乱度判定</div>
-                <div style="display:flex; justify-content:space-around; margin-top:10px;">
-                    <div style="flex:1; text-align:center;">
-                        <span style="color:#aaa; font-size:0.85rem;">軸馬信頼度</span><br>
-                        <b style="font-size:1.3rem; color:#00f0ff;">{jiku_rank}</b>
-                    </div>
-                    <div style="flex:1; text-align:center;">
-                        <span style="color:#aaa; font-size:0.85rem;">波乱度レベル</span><br>
-                        <b style="font-size:1.3rem; color:#ffd700;">{risk_level}</b>
-                    </div>
+        # 🌟 1. 「レース展開 & 波乱度判定」カード
+        st.markdown(f"""
+        <div class="risk-card">
+            <div class="card-title" style="font-size:1.2rem; margin-bottom:10px;">🔥 レース展開 ＆ 波乱度判定</div>
+            <div style="display:flex; justify-content:space-around; align-items:center; flex-wrap:wrap; gap:15px;">
+                <div style="flex:1; min-width:180px; text-align:center;">
+                    <span style="color:#aaa; font-size:0.9rem;">軸馬信頼度</span><br>
+                    <b style="font-size:1.5rem; color:#00f0ff;">{jiku_rank}</b>
+                </div>
+                <div style="flex:1; min-width:180px; text-align:center;">
+                    <span style="color:#aaa; font-size:0.9rem;">波乱度レベル</span><br>
+                    <b style="font-size:1.5rem; color:#ffd700;">{risk_level}</b>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 
+        st.write("")
+
+        # 🌟 2. 本命・穴馬カード / 順位一覧テーブル
+        col_left, col_right = st.columns([1, 1.2])
+
+        with col_left:
             if honmei_horse is not None:
                 h_pop = honmei_horse.get("予想人気", "-")
                 st.markdown(f"""
@@ -538,11 +545,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                     <div class="card-horse-name">【{h_num}】{h_name}</div>
                     <div style="display:flex; justify-content:space-around; margin-top:10px;">
                         <div style="flex:1; text-align:center;">
-                            <span style="color:#aaa; font-size:0.8rem;">想定人気</span><br>
+                            <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
                             <b style="font-size:1.4rem; color:#fff;">{h_pop} 人気</b>
                         </div>
                         <div style="flex:1; text-align:center;">
-                            <span style="color:#aaa; font-size:0.8rem;">指数合計値</span><br>
+                            <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                             <b class="card-val-gold">{h_score}</b>
                         </div>
                     </div>
@@ -560,11 +567,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                     <div class="card-horse-name">【{a_num}】{a_name}</div>
                     <div style="display:flex; justify-content:space-around; margin-top:10px;">
                         <div style="flex:1; text-align:center;">
-                            <span style="color:#aaa; font-size:0.8rem;">想定人気</span><br>
+                            <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
                             <b style="font-size:1.4rem; color:#fff;">{a_pop} 人気</b>
                         </div>
                         <div style="flex:1; text-align:center;">
-                            <span style="color:#aaa; font-size:0.8rem;">指数合計値</span><br>
+                            <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                             <b class="card-val-red">{a_score}</b>
                         </div>
                     </div>
@@ -597,6 +604,19 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                 st.write("🟡 **相手紐・穴馬グループ**")
                 st.dataframe(sub_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
 
+        st.divider()
+
+        # 🌟 3. 【最重要改修】買い目の直上に「🏁 レース質 ＆ 展開予想シミュレーション」を表示！
+        if "レース質展開予想" in df.columns and str(df["レース質展開予想"].iloc[0]).strip():
+            tenkai_text = str(df["レース質展開予想"].iloc[0]).strip()
+            st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
+            st.markdown(f"""
+            <div style="background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);">
+{tenkai_text}
+            </div>
+            """, unsafe_allow_html=True)
+
+        # 🌟 4. 推奨買い目フォーメーション
         st.subheader("💡 推奨買い目フォーメーション")
 
         for t_item in tickets_list:
@@ -653,7 +673,7 @@ st.markdown("""
     
     .risk-card {
         background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
-        border: 2px solid #00f0ff; border-radius: 10px; padding: 15px; text-align: center; margin-bottom: 15px; box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        border: 2px solid #00f0ff; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 15px; box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
     }
     .honmei-card {
         background: linear-gradient(135deg, #2b1e00 0%, #4a3500 100%);
@@ -859,6 +879,9 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
 （例：20261025_菊花賞_G1）
 （例：20261012_東京11Rペルセウスステークス_OP）
 
+【★レース質 ＆ 展開予想シミュレーションの必須生成指示（ルール■ 7準拠）】
+ルール仕様に基づき、本レースの『レース質（瞬発力/持続力/消耗戦/加速戦）』および『展開予想（ペース・脚質位置取り・ハナ主張・中盤隊列・直線の攻防・勝ち馬の決定打）』を臨場感ある文章で詳細に作成し、`race_quality_and_tenkai` フィールドに出力してください。
+
 【最重要・出走馬の確定判定指示（テキスト＆スクショ画像の両方を視覚的に解析せよ）】
 添付されているテキストデータおよびスクショ画像/PDFから、今回のレースの【本物の出走馬一覧】を視覚的にも確認して抽出してください。
 
@@ -894,6 +917,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
   "race_name": "必ず YYYYMMDD_レース名_グレード 形式（例：20261007_ジャパンダートクラシック_Jpn1）",
   "confidence": "軸馬信頼度判定（例：S (鉄板軸) / A (有力軸) / B (波乱含み)）",
   "risk_level": "波乱度判定（例：★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)）",
+  "race_quality_and_tenkai": "🏁 【対象レース名】レース質 ＆ 展開予想シミュレーション\\n【レース質：消耗戦】\\n（コース特徴と求められる能力の概要）\\n\\n【展開予想】\\nペース：ハイペース\\n逃げ：①...\\n好位：...\\n中位：...\\n後方：...\\n\\n先頭集団の攻防（ハナ主張）\\n...\\n中盤の隊列と有力馬の位置取り\\n...\\n直線の攻防と勝ち馬のシナリオ\\n...\\n結論：勝ち馬の決定打\\n〇〇（決着型）：...",
   "recommended_tickets": [
     "【単勝】 ⑤ （クロワデュノール）",
     "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰",
@@ -955,7 +979,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.3")
+st.title("🏇 ウマエル自動解析システム v1.4")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
