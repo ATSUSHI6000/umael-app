@@ -570,22 +570,30 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
     else:
       risk_level = "★★★ (大波乱混戦)"
 
+  # 🎯 注目波乱馬判定ロジック（本命1位を除外＆人気と評価順のギャップから浮上馬を自動選出）
   df_copy = view_df.copy()
-  df_copy["予想人気_num"] = (
-      pd.to_numeric(df_copy["予想人気"], errors="coerce").fillna(0)
-      if "予想人気" in df_copy.columns
-      else 0
-  )
-  ana_candidates = (
-      df_copy[df_copy["予想人気_num"] >= 4]
-      if "予想人気_num" in df_copy.columns
-      else pd.DataFrame()
-  )
-  ana_horse = (
-      ana_candidates.iloc[0]
-      if not ana_candidates.empty
-      else (view_df.iloc[1] if len(view_df) > 1 else honmei_horse)
-  )
+  other_horses = df_copy.iloc[1:] if len(df_copy) > 1 else pd.DataFrame()
+
+  if not other_horses.empty:
+    best_candidate = None
+    max_gap = -999
+
+    # 本命(1位)以外の馬から、想定人気より指数順位が勝っている（乖離が大きい）馬を探索
+    for rank_offset, (idx, row) in enumerate(other_horses.iterrows(), start=2):
+      pop_num = safe_int(row.get("予想人気", 0))
+      # 想定人気数字 - 評価順位（例：5人気なのに評価2位 ＝ 5 - 2 = +3）
+      gap = (pop_num - rank_offset) if pop_num > 0 else -100
+      if gap > max_gap:
+        max_gap = gap
+        best_candidate = row
+
+    if best_candidate is not None and max_gap > 0:
+      ana_horse = best_candidate
+    else:
+      # 特に乖離が見られない場合は、シンプルに総合評価2位の馬をアサイン
+      ana_horse = other_horses.iloc[0]
+  else:
+    ana_horse = honmei_horse
 
   h_num = (
       str(safe_int(honmei_horse["馬番"], default=1))
@@ -714,7 +722,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
     with col_right:
       st.subheader("📊 総合評価順位一覧")
 
-      # 軸列を除外し、以前の表示項目に復元
       sub_cols = [
           c
           for c in ["馬番", "馬名", "予想人気", "総合スコア"]
@@ -734,7 +741,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             .astype(int)
         )
 
-      # 🟢 指数合計に数値バー（ProgressColumn）を復活設定！
       col_config_sum = {
           "馬番": st.column_config.NumberColumn("馬番", width="small"),
           "馬名": st.column_config.TextColumn("馬名", width="medium"),
@@ -1220,7 +1226,7 @@ def analyze_data_with_gemini(
           contents=contents_payload,
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
-              temperature=0.0,  # 🚀 ランダム性をゼロにして同じ入力で常に同じ結果を出す！
+              temperature=0.0,
           ),
       )
       return response.text
@@ -1243,7 +1249,7 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.9")
+st.title("🏇 ウマエル自動解析システム v2.1")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
