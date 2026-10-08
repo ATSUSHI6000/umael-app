@@ -533,8 +533,8 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 
         st.write("")
 
-        # 🌟 2. 本命・穴馬カード / 順位一覧テーブル
-        col_left, col_right = st.columns([1, 1.2])
+        # 🌟 2. 本命・穴馬カード（左） / 順位一覧テーブル（右） ── 比率を 1 : 2.2 に変更して広大化
+        col_left, col_right = st.columns([1, 2.2])
 
         with col_left:
             if honmei_horse is not None:
@@ -546,7 +546,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                     <div style="display:flex; justify-content:space-around; margin-top:10px;">
                         <div style="flex:1; text-align:center;">
                             <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
-                            <b style="font-size:1.4rem; color:#fff;">{h_pop} 人気</b>
+                            <b style="font-size:1.3rem; color:#fff;">{h_pop} 人気</b>
                         </div>
                         <div style="flex:1; text-align:center;">
                             <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
@@ -568,7 +568,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                     <div style="display:flex; justify-content:space-around; margin-top:10px;">
                         <div style="flex:1; text-align:center;">
                             <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
-                            <b style="font-size:1.4rem; color:#fff;">{a_pop} 人気</b>
+                            <b style="font-size:1.3rem; color:#fff;">{a_pop} 人気</b>
                         </div>
                         <div style="flex:1; text-align:center;">
                             <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
@@ -581,28 +581,29 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         with col_right:
             st.subheader("📊 総合評価順位一覧")
 
-            sub_cols = [c for c in ["馬番", "馬名", "予想人気", "総合スコア"] if c in view_df.columns]
+            sub_cols = [c for c in ["馬番", "馬名", "予想人気", "総合スコア", "評価", "軸"] if c in view_df.columns]
             disp_df = view_df[sub_cols].copy()
             if "馬番" in disp_df.columns:
                 disp_df["馬番"] = pd.to_numeric(disp_df["馬番"], errors='coerce').fillna(0).astype(int)
             if "総合スコア" in disp_df.columns:
                 disp_df["総合スコア"] = pd.to_numeric(disp_df["総合スコア"], errors='coerce').fillna(0).astype(int)
 
-            col_config_sum = {
-                "総合スコア": st.column_config.ProgressColumn(
-                    "指数合計値", format="%d点", min_value=0, max_value=100
-                )
-            }
+            # 表の列名を分かりやすく
+            disp_df = disp_df.rename(columns={
+                "総合スコア": "指数合計",
+                "予想人気": "想定人気"
+            })
 
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
+            # 🌟 スクロールバーが一切出ない st.table で全体を一発表示！
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
-            st.dataframe(top_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
+            st.table(top_group)
 
             if not sub_group.empty:
                 st.write("🟡 **相手紐・穴馬グループ**")
-                st.dataframe(sub_group, column_config=col_config_sum, use_container_width=True, hide_index=True)
+                st.table(sub_group)
 
         st.divider()
 
@@ -652,22 +653,35 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large")
         }
 
-        st.dataframe(view_df, column_config=col_config_detail, use_container_width=True, height=520, hide_index=True)
+        st.dataframe(view_df, column_config=col_config_detail, use_container_width=True, height=600, hide_index=True)
 
 
 # カスタムCSS
 st.markdown("""
 <style>
-    /* 🚀 メインコンテナの幅制限を完全解除して画面いっぱいに広げる（ウマエル全画面モード） */
-    .block-container, div[data-testid="stMainBlockContainer"] {
+    /* 🚀 画面幅制限の完全解除 (Streamlitの全てのコンテナ枠を限界まで拡張) */
+    [data-testid="stAppViewContainer"] {
+        width: 100% !important;
+    }
+    .main .block-container,
+    div[data-testid="stMainBlockContainer"],
+    div[data-testid="stAppViewBlockContainer"],
+    section.main > div {
         max-width: 98% !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-        padding-top: 1.5rem !important;
+        width: 98% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1rem !important;
     }
 
     .main { background-color: #080a0f; }
     h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
+
+    /* テーブルの文字色・見やすさ調整 */
+    div[data-testid="stTable"] table {
+        width: 100% !important;
+        font-size: 0.95rem !important;
+    }
 
     div[data-testid="stDataFrame"] div[role="progressbar"] {
         height: 14px !important;
@@ -694,10 +708,21 @@ st.markdown("""
     .kaime-card-item {
         background: #111622; border: 2px solid #ffd700; border-left: 6px solid #ffd700; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff; box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
     }
-    .card-title { font-size: 1.1rem; font-weight: bold; color: #ffffff; }
-    .card-horse-name { font-size: 1.6rem; font-weight: bold; color: #ffffff; margin: 5px 0; }
-    .card-val-gold { font-size: 2.2rem; font-weight: bold; color: #f39c12; }
-    .card-val-red { font-size: 2.2rem; font-weight: bold; color: #ff4d4d; }
+    .card-title { font-size: 1.05rem; font-weight: bold; color: #ffffff; }
+    
+    /* 馬名の縦折れ・崩れ防止 */
+    .card-horse-name { 
+        font-size: 1.4rem !important; 
+        font-weight: bold; 
+        color: #ffffff; 
+        margin: 6px 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .card-val-gold { font-size: 2.0rem; font-weight: bold; color: #f39c12; }
+    .card-val-red { font-size: 2.0rem; font-weight: bold; color: #ff4d4d; }
     
     .stButton>button {
         background: linear-gradient(135deg, #f39c12 0%, #d35400 100%);
@@ -987,7 +1012,7 @@ def analyze_data_with_gemini(api_key, active_rules, text_group1, parts_group1, t
                 raise e
 
 
-st.title("🏇 ウマエル自動解析システム v1.5")
+st.title("🏇 ウマエル自動解析システム v1.6")
 st.caption("馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール")
 
 # --------------------------------------------------
