@@ -531,7 +531,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
       else "競馬予想解析"
   )
   view_df = df.drop(
-      columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目"],
+      columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ"],
       errors="ignore",
   )
 
@@ -575,43 +575,34 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
   other_horses = df_copy.iloc[1:].copy() if len(df_copy) > 1 else pd.DataFrame()
 
   if not other_horses.empty:
-    # 予想人気を数値化
     other_horses["pop_num"] = (
         pd.to_numeric(other_horses["予想人気"], errors="coerce")
         .fillna(99)
         .astype(int)
     )
-    # 総合スコア（指数）を数値化
     other_horses["score_num"] = (
         pd.to_numeric(other_horses["総合スコア"], errors="coerce")
         .fillna(0)
         .astype(int)
     )
-    # 評価ランク文字列の標準化
     other_horses["eval_clean"] = (
         other_horses["評価"].astype(str).str.strip().str.upper()
     )
-    # 評価順位（本命除外なので2位〜）
     other_horses["eval_rank"] = range(2, len(other_horses) + 2)
-
-    # ギャップ値（予想人気順位 - 評価順位）の算出
     other_horses["gap"] = (
         other_horses["pop_num"] - other_horses["eval_rank"]
     )
 
-    # 🔥 【条件】指数75点以上 ＆ C評価以外の馬（B評価以上）に限定
     ana_filtered = other_horses[
         (other_horses["score_num"] >= 75) & (other_horses["eval_clean"] != "C")
     ]
 
     if not ana_filtered.empty:
-      # 条件を満たす中でgapが最も大きい馬を選出（同点なら評価上位・高スコア優先）
       best_ana = ana_filtered.sort_values(
           by=["gap", "eval_rank"], ascending=[False, True]
       ).iloc[0]
       ana_horse = best_ana
     else:
-      # 条件を満たす馬がいない場合、C評価以外の馬の中でギャップ最大の馬をフォールバック
       non_c_horses = other_horses[other_horses["eval_clean"] != "C"]
       if not non_c_horses.empty:
         ana_horse = non_c_horses.sort_values(
@@ -873,7 +864,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 st.markdown(
     """
 <style>
-    /* 🚀 画面幅制限の完全解除 (Streamlitの全てのコンテナ枠を限界まで拡張) */
+    /* 🚀 画面幅制限の完全解除 */
     [data-testid="stAppViewContainer"] {
         width: 100% !important;
     }
@@ -918,7 +909,6 @@ st.markdown(
     }
     .card-title { font-size: 1.05rem; font-weight: bold; color: #ffffff; }
     
-    /* 馬名の縦折れ・崩れ防止 */
     .card-horse-name { 
         font-size: 1.4rem !important; 
         font-weight: bold; 
@@ -944,7 +934,7 @@ st.markdown(
 
 
 # --------------------------------------------------
-# 🚀 閲覧専用モード分岐
+# 🚀 閲覧専用モード分岐（ポータル機能）
 # --------------------------------------------------
 query_params = st.query_params
 
@@ -1015,6 +1005,12 @@ def save_to_db(new_df):
       old_df = pd.read_csv(DB_FILE)
       if "総合スコアグラフ" in old_df.columns:
         old_df = old_df.drop(columns=["総合スコアグラフ"])
+
+      # 同一レース名が存在する場合は既存データを上書き更新
+      if "レース名" in new_df.columns and "レース名" in old_df.columns:
+        race_n = new_df["レース名"].iloc[0]
+        old_df = old_df[old_df["レース名"].astype(str) != str(race_n)]
+
       combined_df = pd.concat([old_df, clean_save_df], ignore_index=True)
       combined_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
       return combined_df
@@ -1024,6 +1020,45 @@ def save_to_db(new_df):
   else:
     clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
     return clean_save_df
+
+
+def update_db_with_recap(race_name, result_df, memo_text):
+  """回顧結果（確定着順・回顧メモ等）をデータベースに保存・プールする"""
+  if not os.path.exists(DB_FILE):
+    return
+  try:
+    df = pd.read_csv(DB_FILE)
+    if "レース名" not in df.columns:
+      return
+
+    # 回顧情報のマップを作成
+    rank_map = {}
+    if not result_df.empty and "馬番" in result_df.columns and "確定着順" in result_df.columns:
+      for _, row in result_df.iterrows():
+        try:
+          b_num = int(str(row["馬番"]).strip())
+          r_val = str(row["確定着順"]).strip()
+          rank_map[b_num] = r_val
+        except Exception:
+          pass
+
+    mask = df["レース名"].astype(str) == str(race_name)
+    if not mask.any():
+      return
+
+    def assign_rank(row):
+      try:
+        b_num = int(row["馬番"])
+        return rank_map.get(b_num, row.get("確定着順", ""))
+      except Exception:
+        return row.get("確定着順", "")
+
+    df.loc[mask, "確定着順"] = df[mask].apply(assign_rank, axis=1)
+    df.loc[mask, "回顧メモ"] = str(memo_text).strip()
+
+    df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+  except Exception as e:
+    st.warning(f"⚠️ データベースの回顧プール保存中に注意: {e}")
 
 
 def delete_race_from_db(race_name):
@@ -1163,7 +1198,7 @@ def analyze_data_with_gemini(
 
 【★レース名・グレードの厳格特定＆適合ルール（絶対厳守）】
 1. 添付された出馬表・馬柱データから、「開催日（西暦8桁 YYYYMMDD）」「正確なレース名」「実際のレースグレード（G1, Jpn1, G2, Jpn2, G3, Jpn3, L, OP, 3歳以上1勝クラス等）」を正確に検知してください。
-2. 上記で適用指示された評価ルール（G1専用 / 平場・G2・G3専用 / 北海道・洋芝専用）に基づき評価を行いますが、実際のレースデータがG1/Jpn1以外のグレード（例: G2, G3, OP, 条件戦など）である場合、G1専用の評価基準や表記を誤って全適用してはいけません。実際のレースのグレードに完全に合致させた出力を行ってください。
+2. 上記で適用指示された評価ルールに基づき評価を行いますが、実際のレースデータがG1/Jpn1以外のグレード（例: G2, G3, OP, 条件戦など）である場合、G1専用の評価基準や表記を誤って全適用してはいけません。実際のレースのグレードに完全に合致させた出力を行ってください。
 3. `race_name` は必ず以下のフォーマットで生成・出力してください！
 
 フォーマット： YYYYMMDD_レース名_グレード
@@ -1171,7 +1206,6 @@ def analyze_data_with_gemini(
 （例：20261011_毎日王冠_G2）
 （例：20261025_菊花賞_G1）
 （例：20261012_東京11Rペルセウスステークス_OP）
-（例：20261018_東京8R3歳以上1勝クラス_1勝クラス）
 
 【★レース質 ＆ 展開予想シミュレーションの必須生成指示（ルール■ 7準拠）】
 ルール仕様に基づき、本レースの『レース質（瞬発力/持続力/消耗戦/加速戦）』および『展開予想（ペース・脚質位置取り・ハナ主張・中盤隊列・直線の攻防・勝ち馬の決定打）』を臨場感ある文章で詳細に作成し、`race_quality_and_tenkai` フィールドに出力してください。
@@ -1258,7 +1292,7 @@ def analyze_data_with_gemini(
           config=types.GenerateContentConfig(
               response_mime_type="application/json",
               temperature=0.0,
-              seed=42,  # 🔒 乱数シードを42に固定して出力を再現可能に！
+              seed=42,  # 🔒 乱数シードを42に固定
           ),
       )
       return response.text
@@ -2030,7 +2064,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                 on_bad_lines="skip",
             )
 
-            # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング（小数第1位に整形カット）
+            # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング
             for col_name in ["確定オッズ", "上り3F"]:
               if col_name in res_df.columns:
 
@@ -2044,6 +2078,9 @@ elif selected_menu == "🔄 回顧・精度検証":
                     return str(v)
 
                 res_df[col_name] = res_df[col_name].apply(clean_decimal)
+
+            # 💾 改修ポイント2: 回顧結果をデータベース（プール）に自動更新保存！
+            update_db_with_recap(selected_race, res_df, memo_part)
 
             def highlight_ranks(row):
               rank_str = str(row.get("確定着順", ""))
@@ -2065,9 +2102,7 @@ elif selected_menu == "🔄 回顧・精度検証":
               return [""] * len(row)
 
             st.success(
-                f"🎉"
-                f" レース「{selected_race}」の全着順照合 ＆ 回顧 ＆"
-                " ルール検証が完了しました！"
+                f"🎉 レース「{selected_race}」の全着順照合 ＆ 回顧 ＆ ルール検証が完了し、データベースにプール保存されました！"
             )
 
             st.subheader("🏆 全着順 ＆ 予想照合結果")
@@ -2089,12 +2124,13 @@ elif selected_menu == "🔄 回顧・精度検証":
                   " 今回のレース検証結果：現行ルール・ロジックのままで問題ありません。"
               )
             else:
-              st.warning("⚠️ ルール改修案が提案されました：")
-              st.text_area(
-                  "提案された改修ルールテキスト",
-                  value=rule_update_clean,
-                  height=300,
-              )
+              st.warning("⚠️ ルール改修案が提案されました！")
+              
+              # 📋 改修ポイント1: 読み込み中の全ルール＋提案を組み合わせ、右上ワンタップコピー枠を出力！
+              full_merged_rule = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
+              
+              st.write("💡 **以下の枠内（右上コピーボタン）から修正版ルール全文を一括コピーして、「⚙️ ルール管理・アップデート」画面へ貼り付け保存できます：**")
+              st.code(full_merged_rule, language="text")
 
           except Exception as e:
             st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
@@ -2143,7 +2179,8 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     st.divider()
 
-    st.subheader("🔗 レース別の知人共有用パラメータ")
+    # 🔗 改修ポイント3: 閲覧専用ダイレクトURL（[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=)...）表示！
+    st.subheader("🔗 レース別の知人共有用ポータルURL")
     races_list_all = (
         db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
     )
@@ -2153,11 +2190,33 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         key="share_race_select",
     )
     if share_race:
-      st.code(f"?race={share_race}", language="text")
+      full_share_url = f"[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=){share_race}"
+      st.write("💡 **知人に見せたい場合は、以下のURLをそのまま送ってください（右上のボタンでコピー可）：**")
+      st.code(full_share_url, language="text")
 
     st.divider()
 
+    # 🐴 改修ポイント4: 確定着順の表示＆ハイライトカラー（1着=金、2着=水色、3着=銅）を自動適用！
+    disp_db_df = db_df.copy()
+    
+    # 着順データが存在する場合は「確定着順」列を上位に配置
+    if "確定着順" in disp_db_df.columns:
+      cols_order = ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気"] + [c for c in disp_db_df.columns if c not in ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気", "確定オッズ", "上り3F", "回顧メモ"]]
+      disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
+
+    def db_highlight_ranks(row):
+      rank_str = str(row.get("確定着順", "")).strip()
+      if rank_str in ["1", "1着"]:
+        return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
+      elif rank_str in ["2", "2着"]:
+        return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
+      elif rank_str in ["3", "3着"]:
+        return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
+      return [""] * len(row)
+
     db_col_config = {
+        "確定着順": st.column_config.TextColumn("着順", width="small"),
+        "馬番": st.column_config.NumberColumn("馬番", width="small"),
         "総合スコア": st.column_config.ProgressColumn(
             "総合スコア", format="%d点", min_value=0, max_value=100
         )
@@ -2165,11 +2224,11 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     search_race = st.text_input("🔍 レース名で検索", "")
     if search_race:
-      filtered_df = db_df[
-          db_df["レース名"].astype(str).str.contains(search_race, na=False)
+      filtered_df = disp_db_df[
+          disp_db_df["レース名"].astype(str).str.contains(search_race, na=False)
       ]
       st.dataframe(
-          filtered_df,
+          filtered_df.style.apply(db_highlight_ranks, axis=1),
           column_config=db_col_config,
           use_container_width=True,
           height=500,
@@ -2177,7 +2236,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
       )
     else:
       st.dataframe(
-          db_df,
+          disp_db_df.style.apply(db_highlight_ranks, axis=1),
           column_config=db_col_config,
           use_container_width=True,
           height=500,
