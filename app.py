@@ -1278,7 +1278,7 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("🏇 ウマエル自動解析システム v2.6")
+st.title("🏇 ウマエル自動解析システム v2.7")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
@@ -1972,6 +1972,8 @@ elif selected_menu == "🔄 回顧・精度検証":
 
 確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t軸ヒモ切り\t勝因・敗因ショートメモ
 
+※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。
+
 2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に回顧コメントを出力してください。
 3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、必要なら修正版ルールテキストを出力してください。
 """
@@ -2019,8 +2021,26 @@ elif selected_menu == "🔄 回顧・精度検証":
                 tbl_part.replace("```tsv", "").replace("```", "").strip()
             )
             res_df = pd.read_csv(
-                io.StringIO(clean_tbl), sep="\t", on_bad_lines="skip"
+                io.StringIO(clean_tbl),
+                sep="\t",
+                dtype=str,
+                on_bad_lines="skip",
             )
+
+            # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング（小数第1位に整形カット）
+            for col_name in ["確定オッズ", "上り3F"]:
+              if col_name in res_df.columns:
+
+                def clean_decimal(v):
+                  if pd.isna(v) or not str(v).strip():
+                    return ""
+                  try:
+                    val = float(str(v).strip())
+                    return f"{val:.1f}"
+                  except Exception:
+                    return str(v)
+
+                res_df[col_name] = res_df[col_name].apply(clean_decimal)
 
             def highlight_ranks(row):
               rank_str = str(row.get("確定着順", ""))
