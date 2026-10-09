@@ -29,7 +29,7 @@ DRAFTS_DIR = "race_drafts"
 
 
 # --------------------------------------------------
-# 🛠 共通ヘルパー関数・定義（順序調整済み）
+# 🛠 共通ヘルパー関数・定義
 # --------------------------------------------------
 
 def ensure_drafts_dir():
@@ -1353,6 +1353,19 @@ def analyze_data_with_gemini(
 # 🧭 UI・画面メイン構成
 # --------------------------------------------------
 
+# 🌟 トースト通知（保存メッセージ等の表示保持）
+if "draft_toast_msg" in st.session_state:
+    msg_type, msg_text = st.session_state.pop("draft_toast_msg")
+    if msg_type == "success":
+        st.success(msg_text)
+        st.toast(msg_text, icon="✅")
+    elif msg_type == "warning":
+        st.warning(msg_text)
+        st.toast(msg_text, icon="⚠️")
+    elif msg_type == "error":
+        st.error(msg_text)
+        st.toast(msg_text, icon="❌")
+
 st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
 st.title("ウマエル解析サイト v2.7")
 st.caption(
@@ -1451,7 +1464,8 @@ if selected_menu == "📋 レース分析・予想":
             draft_choice = st.selectbox(
                 "既存の準備中レースを選択する：",
                 ["✨ 【新規レース作成（馬柱からレース名自動判別）】"] + existing_drafts,
-                index=default_idx
+                index=default_idx,
+                key="draft_race_select_box"
             )
             if (
                 draft_choice
@@ -1535,25 +1549,29 @@ if selected_menu == "📋 レース分析・予想":
                     and not files_group3
                     and not urls_group4_input.strip()
                 ):
-                    st.warning("⚠️ 追加保存するファイルまたはURLを入力してください！")
+                    st.session_state["draft_toast_msg"] = ("warning", "⚠️ 追加保存するファイルまたはURLを入力してください！")
+                    st.rerun()
                 else:
-                    target_name = draft_race_name.strip() if draft_race_name and draft_race_name.strip() else ""
-                    try:
-                        saved_c, actual_draft_name = save_draft_data(
-                            target_name,
-                            files_group1,
-                            files_group2,
-                            files_group3,
-                            urls_group4_input,
-                        )
-                        st.session_state["selected_draft_race"] = actual_draft_name
-                        st.success(
-                            f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を蓄積保存しました！"
-                        )
-                        st.session_state.pop("analyzed_df", None)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 保存中にエラーが発生しました: {e}")
+                    with st.spinner("💾 ファイル・データを下書き保存中..."):
+                        target_name = draft_race_name.strip() if draft_race_name and draft_race_name.strip() else ""
+                        try:
+                            saved_c, actual_draft_name = save_draft_data(
+                                target_name,
+                                files_group1,
+                                files_group2,
+                                files_group3,
+                                urls_group4_input,
+                            )
+                            st.session_state["selected_draft_race"] = actual_draft_name
+                            st.session_state["draft_toast_msg"] = (
+                                "success",
+                                f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を下書き保存しました！"
+                            )
+                            st.session_state.pop("analyzed_df", None)
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state["draft_toast_msg"] = ("error", f"❌ 保存中にエラーが発生しました: {e}")
+                            st.rerun()
 
         with btn_col2:
             if st.button(
@@ -1673,14 +1691,13 @@ if selected_menu == "📋 レース分析・予想":
                     "✨ 【新規レース作成（馬柱からレース名自動判別）】",
                     "",
                 ]:
-                    delete_draft(draft_race_name)
-                    if "selected_draft_race" in st.session_state:
-                        del st.session_state["selected_draft_race"]
-                    st.success(
-                        f"🗑️ レース「{draft_race_name}」の下書きデータを削除しました！"
-                    )
-                    st.session_state.pop("analyzed_df", None)
-                    st.rerun()
+                    with st.spinner("🗑️ 下書きデータを削除中..."):
+                        delete_draft(draft_race_name)
+                        if "selected_draft_race" in st.session_state:
+                            del st.session_state["selected_draft_race"]
+                        st.session_state["draft_toast_msg"] = ("success", f"🗑️ レース「{draft_race_name}」の下書きデータを削除しました！")
+                        st.session_state.pop("analyzed_df", None)
+                        st.rerun()
 
     else:
         if st.button("🔥 AI分析を実行する", use_container_width=True):
