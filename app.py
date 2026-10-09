@@ -211,6 +211,24 @@ def save_api_key(key_text):
     pass
 
 
+# 🛠️ 馬番・着順の表記ゆれ正規化クレンジング関数
+def normalize_horse_num(val):
+  if pd.isna(val):
+    return ""
+  s = re.sub(r"\D", "", str(val))
+  return str(int(s)) if s else ""
+
+
+def normalize_rank(val):
+  if pd.isna(val):
+    return ""
+  s = str(val).strip()
+  m = re.search(r"\d+", s)
+  if m:
+    return str(int(m.group(0)))
+  return s
+
+
 # 馬番（1〜20）を丸囲み文字（①〜⑳）に変換する関数
 def convert_to_circled_numbers(text):
   circled_map = {
@@ -482,6 +500,7 @@ def parse_json_ai_output(result_text):
 
       if h_num > 0 and h_name:
         parsed_rows.append({
+            "確定着順": "",  # 初期値は空文字
             "馬番": h_num,
             "馬名": h_name,
             "予想人気": pop_val,
@@ -1020,7 +1039,7 @@ def save_to_db(new_df):
 
 
 def update_db_with_recap(race_name, result_df, memo_text):
-  """🎯 照合結果（確定着順・回顧メモ等）をデータベースに確実に上書き反映してプール保存する"""
+  """🎯 照合結果（確定着順・回顧メモ等）を強力に正規化してデータベースに確実に反映・プール保存する"""
   if not os.path.exists(DB_FILE):
     return
   try:
@@ -1028,35 +1047,31 @@ def update_db_with_recap(race_name, result_df, memo_text):
     if "レース名" not in df.columns:
       return
 
-    # 着順・馬番マップの構築
+    # 馬番・着順の正規化マッピング
     rank_map = {}
     if not result_df.empty and "馬番" in result_df.columns and "確定着順" in result_df.columns:
       for _, row in result_df.iterrows():
-        try:
-          b_num = int(str(row["馬番"]).strip())
-          r_val = str(row["確定着順"]).strip()
-          if r_val and r_val != "nan":
-            rank_map[b_num] = r_val
-        except Exception:
-          pass
+        b_num = normalize_horse_num(row.get("馬番", ""))
+        r_val = normalize_rank(row.get("確定着順", ""))
+        if b_num and r_val:
+          rank_map[b_num] = r_val
 
-    mask = df["レース名"].astype(str) == str(race_name)
+    mask = df["レース名"].astype(str).str.strip() == str(race_name).strip()
     if not mask.any():
       return
 
-    # 着順列の確実な代入
     if "確定着順" not in df.columns:
       df["確定着順"] = ""
 
     def assign_rank(row):
-      try:
-        b_num = int(row["馬番"])
-        return rank_map.get(b_num, row.get("確定着順", ""))
-      except Exception:
-        return row.get("確定着順", "")
+      b_num = normalize_horse_num(row.get("馬番", ""))
+      if b_num in rank_map:
+        return rank_map[b_num]
+      existing = normalize_rank(row.get("確定着順", ""))
+      return existing if existing else ""
 
     df.loc[mask, "確定着順"] = df[mask].apply(assign_rank, axis=1)
-    
+
     if "回顧メモ" not in df.columns:
       df["回顧メモ"] = ""
     df.loc[mask, "回顧メモ"] = str(memo_text).strip()
@@ -1749,16 +1764,6 @@ if selected_menu == "📋 レース分析・予想":
         and st.session_state["analysis_success_msg"]
     ):
       st.success(st.session_state["analysis_success_msg"])
-      
-      current_race_n = (
-          st.session_state["analyzed_df"]["レース名"].iloc[0]
-          if "レース名" in st.session_state["analyzed_df"].columns
-          else ""
-      )
-      if current_race_n:
-        share_url = f"https://umael-pro.streamlit.app/?race={current_race_n}"
-        st.write("💡 **知人共有用ポータルURL（右上のボタンでコピー可）：**")
-        st.code(share_url, language="text")
 
     render_race_evaluation_view(
         st.session_state["analyzed_df"], is_viewer_mode=False
@@ -2112,18 +2117,18 @@ elif selected_menu == "🔄 回顧・精度検証":
             update_db_with_recap(selected_race, res_df, memo_part)
 
             def highlight_ranks(row):
-              rank_str = str(row.get("確定着順", ""))
-              if rank_str in ["1", "1着"]:
+              rank_val = normalize_rank(row.get("確定着順", ""))
+              if rank_val == "1":
                 return [
                     "background-color: #4a3b00; color: #ffd700; font-weight:"
                     " bold;"
                 ] * len(row)
-              elif rank_str in ["2", "2着"]:
+              elif rank_val == "2":
                 return [
                     "background-color: #223344; color: #00ffff; font-weight:"
                     " bold;"
                 ] * len(row)
-              elif rank_str in ["3", "3着"]:
+              elif rank_val == "3":
                 return [
                     "background-color: #332211; color: #ffaa55; font-weight:"
                     " bold;"
@@ -2217,35 +2222,21 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     st.divider()
 
-    st.subheader("🔗 レース別の知人共有用ポータルURL")
-    races_list_all = (
-        db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
-    )
-    share_race = st.selectbox(
-        "共有URLを発行したいレースを選択",
-        races_list_all,
-        key="share_race_select",
-    )
-    if share_race:
-      full_share_url = f"[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=){share_race}"
-      st.write("💡 **知人に見せたい場合は、以下のURLをそのまま送ってください（右上のボタンでコピー可）：**")
-      st.code(full_share_url, language="text")
-
-    st.divider()
-
     disp_db_df = db_df.copy()
     
+    # 着順・主要列の表示並び替え（確定着順を先頭付近に配置）
     if "確定着順" in disp_db_df.columns:
       cols_order = ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気"] + [c for c in disp_db_df.columns if c not in ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気", "確定オッズ", "上り3F", "回顧メモ"]]
       disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
 
+    # 🎨 DBプール画面用の確実な1〜3着カラーハイライト関数
     def db_highlight_ranks(row):
-      rank_str = str(row.get("確定着順", "")).strip()
-      if rank_str in ["1", "1着"]:
+      rank_val = normalize_rank(row.get("確定着順", ""))
+      if rank_val == "1":
         return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
-      elif rank_str in ["2", "2着"]:
+      elif rank_val == "2":
         return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
-      elif rank_str in ["3", "3着"]:
+      elif rank_val == "3":
         return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
       return [""] * len(row)
 
