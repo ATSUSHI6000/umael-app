@@ -942,8 +942,6 @@ if "race" in query_params:
   target_race_param = query_params["race"]
   db_df = load_db()
 
-  st.title("🏇 AI分析 レース予想ポータル")
-
   if not db_df.empty and "レース名" in db_df.columns:
     matched_df = db_df[db_df["レース名"].astype(str) == str(target_race_param)]
     if not matched_df.empty:
@@ -1731,7 +1729,7 @@ if selected_menu == "📋 レース分析・予想":
           except Exception as e:
             st.error(f"❌ 解析中にエラーが発生しました:\n{e}")
 
-  # 🔗 メイン階層描画エリア（余明な装飾を排したプレーンテキスト形式URL）
+  # 🔗 メイン階層描画エリア
   if (
       "analyzed_df" in st.session_state
       and not st.session_state["analyzed_df"].empty
@@ -2021,7 +2019,20 @@ elif selected_menu == "🔄 回顧・精度検証":
 ※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。
 
 2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に回顧コメントを出力してください。
-3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、必要なら修正版ルールテキストを出力してください。
+3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、ルール改修案がある場合は必ず以下の【厳格な2ブロック構成】で出力してください：
+
+【★重要規則：バージョン繰り上げ指定】
+現在適用中のルールタイトルに記載されているバージョン（例: ver.8.3）を特定し、必ずバージョン番号を「+0.1」繰り上げたタイトル（例: ver.8.4）に改訂・ナンバリングしてください！
+
+[ブロック1：今回の補正・改修部分のみの枠]
+【今回追加・修正された改修案（補正内容）】
+（例：ver.8.3 → ver.8.4 への改修点、新設・変更された箇条書き条項のみを記述）
+
+---FULL_MERGED_RULE---
+
+[ブロック2：バージョン繰り上げ済みのルール全文枠]
+【◯◯専用・評価表出力ルール（ver.8.X・...）】
+（※ヘッダータイトルのバージョンをver.8.Xから更新後の新バージョンに変更し、本文内の更新日時も最新にし、補正・改修部分を正しい該当項目内に差し込み・完全統合した状態の『最新ルール全文』を出力してください。末尾への単純追記ではなく、ルール文章全体に適切に挿入・結合された完成版全文にすること）
 """
             client = genai.Client(api_key=api_key)
             contents_list = [prompt]
@@ -2132,12 +2143,23 @@ elif selected_menu == "🔄 回顧・精度検証":
                   " 今回のレース検証結果：現行ルール・ロジックのままで問題ありません。"
               )
             else:
-              st.warning("⚠️ ルール改修案が提案されました！")
+              st.warning("⚠️ 新しいルール改修案が提案されました！")
               
-              full_merged_rule = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
+              # ★ 補正部分の枠 ＆ バージョン変更済み全文の枠に綺麗に分割！
+              if "---FULL_MERGED_RULE---" in rule_update_clean:
+                diff_summary, full_rule_body = rule_update_clean.split("---FULL_MERGED_RULE---", 1)
+              else:
+                diff_summary = rule_update_clean
+                full_rule_body = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
               
-              st.write("💡 **以下の枠内（右上コピーボタン）から修正版ルール全文を一括コピーして、「⚙️ ルール管理・アップデート」画面へ貼り付け保存できます：**")
-              st.code(full_merged_rule, language="text")
+              # ① 補正部分の枠（差分サマリー）
+              st.markdown("#### 📌 1. 今回の補正・改修部分（バージョン更新内容）")
+              st.code(diff_summary.strip(), language="text")
+
+              # ② バージョン繰り上げ＆補正を挿入した状態の全文の枠
+              st.markdown("#### 📋 2. 保存用：バージョン更新済み 完全統合ルール全文（ワンタップコピー用）")
+              st.write("💡 **以下の枠内をコピーして「⚙️ ルール管理・アップデート」画面へそのまま貼り付け保存してください：**")
+              st.code(full_rule_body.strip(), language="text")
 
           except Exception as e:
             st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
