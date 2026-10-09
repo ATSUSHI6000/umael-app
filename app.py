@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import urllib.request
+import urllib.parse
 from google import genai
 from google.genai import types
 import pandas as pd
@@ -1039,42 +1040,45 @@ def save_to_db(new_df):
 
 
 def update_db_with_recap(race_name, result_df, memo_text):
-  """🎯 照合結果（確定着順・回顧メモ等）を強力に正規化してデータベースに確実に反映・プール保存する"""
+  """確定着順・結果テーブルの主要項目・レース回顧を過去馬DBへ保存する。"""
   if not os.path.exists(DB_FILE):
     return
   try:
-    df = pd.read_csv(DB_FILE)
+    df = pd.read_csv(DB_FILE, dtype=str).fillna("")
     if "レース名" not in df.columns:
       return
-
-    # 馬番・着順の正規化マッピング
-    rank_map = {}
-    if not result_df.empty and "馬番" in result_df.columns and "確定着順" in result_df.columns:
-      for _, row in result_df.iterrows():
-        b_num = normalize_horse_num(row.get("馬番", ""))
-        r_val = normalize_rank(row.get("確定着順", ""))
-        if b_num and r_val:
-          rank_map[b_num] = r_val
 
     mask = df["レース名"].astype(str).str.strip() == str(race_name).strip()
     if not mask.any():
       return
 
-    if "確定着順" not in df.columns:
-      df["確定着順"] = ""
+    # 馬番を正規化して結果テーブルをDBの各馬に照合する。
+    result_by_num = {}
+    if not result_df.empty and "馬番" in result_df.columns:
+      for _, result_row in result_df.iterrows():
+        horse_num = normalize_horse_num(result_row.get("馬番", ""))
+        if horse_num:
+          result_by_num[horse_num] = result_row
 
-    def assign_rank(row):
-      b_num = normalize_horse_num(row.get("馬番", ""))
-      if b_num in rank_map:
-        return rank_map[b_num]
-      existing = normalize_rank(row.get("確定着順", ""))
-      return existing if existing else ""
+    # 予想時の「評価」列は保持し、レース結果として保存したい列だけを追加・更新する。
+    result_columns = [
+        "確定着順", "単勝人気", "確定オッズ", "タイム", "上り3F",
+        "軸ヒモ切り", "勝因・敗因ショートメモ",
+    ]
+    for col in result_columns + ["回顧メモ"]:
+      if col not in df.columns:
+        df[col] = ""
 
-    df.loc[mask, "確定着順"] = df[mask].apply(assign_rank, axis=1)
-
-    if "回顧メモ" not in df.columns:
-      df["回顧メモ"] = ""
-    df.loc[mask, "回顧メモ"] = str(memo_text).strip()
+    for idx in df.index[mask]:
+      horse_num = normalize_horse_num(df.at[idx, "馬番"] if "馬番" in df.columns else "")
+      result_row = result_by_num.get(horse_num)
+      if result_row is not None:
+        for col in result_columns:
+          if col in result_df.columns:
+            value = result_row.get(col, "")
+            if pd.notna(value) and str(value).strip():
+              df.at[idx, col] = str(value).strip()
+      df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
     df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
   except Exception as e:
@@ -1764,6 +1768,15 @@ if selected_menu == "📋 レース分析・予想":
         and st.session_state["analysis_success_msg"]
     ):
       st.success(st.session_state["analysis_success_msg"])
+      share_race_name = str(st.session_state["analyzed_df"]["レース名"].iloc[0])
+      share_url = (
+          "https://umael-pro.streamlit.app/?race="
+          + urllib.parse.quote(share_race_name, safe="")
+      )
+      st.markdown("**🔗 知人共有用URL（評価画面のみ）**")
+      st.markdown(f"[共有URLを開く]({share_url})")
+      st.code(share_url, language=None)
+      st.caption("このURLを開くと、選択したレースの評価画面を閲覧できます。")
 
     render_race_evaluation_view(
         st.session_state["analyzed_df"], is_viewer_mode=False
