@@ -304,7 +304,7 @@ def fetch_text_from_url(url):
     try:
       bs4_module = importlib.import_module("bs4")
       BeautifulSoup = getattr(bs4_module, "BeautifulSoup")
-      soup = BeautifulSoup(html, "html.parser")
+      soup = BeautifulSoup(html, "parser")
       for s in soup(["script", "style", "header", "footer", "nav"]):
         s.decompose()
       text = soup.get_text(separator=" ")
@@ -931,6 +931,18 @@ st.markdown(
     }
     .kaime-card-item {
         background: #111622; border: 2px solid #ffd700; border-left: 6px solid #ffd700; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff; box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+    }
+    .recap-box {
+        background-color: #0d1117;
+        border: 2px solid #10b981;
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 25px;
+        white-space: pre-wrap;
+        line-height: 1.8;
+        color: #e6edf3;
+        font-size: 1.0rem;
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
     }
     .card-title { font-size: 1.05rem; font-weight: bold; color: #ffffff; }
     
@@ -1978,7 +1990,7 @@ elif selected_menu == "🔄 回顧・精度検証":
       else:
         with st.spinner(
             "🏇"
-            " AIが全着順を照合・回顧し、評価ルールの見直し要否を検証中..."
+            " AIが全着順を照合・深掘り長文回顧し、評価ルールの見直し要否を検証中..."
         ):
           try:
             raw_result = res_text_input if res_text_input else ""
@@ -2029,7 +2041,7 @@ elif selected_menu == "🔄 回顧・精度検証":
               )
 
             prompt = f"""あなたは競馬予想プロフェッショナル「AI」です。
-以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ」を突き合わせ、全着順テーブル、回顧レポート、および【ルール改修案の自動判定】を行ってください。
+以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ」を突き合わせ、全着順テーブル、プロ視点による詳細で長文の【本格レース回顧・見解レポート】、および【ルール改修案の自動判定】を行ってください。
 
 【予想データ】
 {predict_summary}
@@ -2043,11 +2055,29 @@ elif selected_menu == "🔄 回顧・精度検証":
 【出力フォーマット要求】
 1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：
 
-確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t軸ヒモ切り\t勝因・敗因ショートメモ
+確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ
 
 ※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。
 
-2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に回顧コメントを出力してください。
+2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・プロの長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：
+
+   📌 1. 【レース全体の展開 ＆ 馬場・ペース振り返り】
+   ・スタートから道中のペース（ハイ・ミドル・スロー）とトラックバイアス（内外・前後有利）の分析
+   ・事前予想の展開シミュレーションとの合致点・乖離点の検証
+
+   🏆 2. 【上位入線馬（1〜3着馬）の勝因・勝負の分かれ目】
+   ・勝ち馬および好走馬の勝因（展開の助け、コース取り、馬場適性、騎手好判断など）の詳細見解
+
+   ⚠️ 3. 【人気裏切り馬・凡走馬の敗因分析】
+   ・1〜3番人気で敗れた馬や注目馬の敗因（出遅れ、展開不向き、馬場ノメり、距離限界、疲労、傷病等）を深掘り
+
+   🎯 4. 【次走巻き返し注目馬 ＆ 危険な人気馬メモ】
+   ・不利や展開不向きで崩れた「次走狙い目馬」
+   ・今回展開や恵まれた枠順で激走した「次走過剰人気注意馬」
+
+   📊 5. 【予想ロジック・指数との整合性検証】
+   ・指数・評価（S, A, B等）通りに好走した馬の検証、および評価から外れた波乱要素の要因特定
+
 3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、ルール改修案がある場合は必ず以下の【厳格な2ブロック構成】で出力してください：
 
 【★重要規則：バージョン繰り上げ指定】
@@ -2113,6 +2143,9 @@ elif selected_menu == "🔄 回顧・精度検証":
                 on_bad_lines="skip",
             )
 
+            # 🛠️ 不要な「軸ヒモ切り」列が含まれていれば完全に除外
+            res_df = res_df.drop(columns=["軸ヒモ切り"], errors="ignore")
+
             # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング
             for col_name in ["確定オッズ", "上り3F"]:
               if col_name in res_df.columns:
@@ -2151,7 +2184,7 @@ elif selected_menu == "🔄 回顧・精度検証":
               return [""] * len(row)
 
             st.success(
-                f"🎉 レース「{selected_race}」の全着順照合 ＆ 回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
+                f"🎉 レース「{selected_race}」の全着順照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
             )
 
             st.subheader("🏆 全着順 ＆ 予想照合結果")
@@ -2162,8 +2195,15 @@ elif selected_menu == "🔄 回顧・精度検証":
                 hide_index=True,
             )
 
-            st.subheader("📝 回顧 ＆ 今後の注目馬メモ")
-            st.info(memo_part.strip())
+            st.subheader("📝 詳細レース回顧・プロの長文見解")
+            st.markdown(
+                f"""
+                <div class="recap-box">
+{memo_part.strip()}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
             st.subheader("⚙️ 評価ルールの見直し・改修結果")
             rule_update_clean = rule_update_part.strip()
