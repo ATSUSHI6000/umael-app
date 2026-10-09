@@ -1020,7 +1020,7 @@ def save_to_db(new_df):
 
 
 def update_db_with_recap(race_name, result_df, memo_text):
-  """回顧結果（確定着順・回顧メモ等）をデータベースに保存・プールする"""
+  """🎯 照合結果（確定着順・回顧メモ等）をデータベースに確実に上書き反映してプール保存する"""
   if not os.path.exists(DB_FILE):
     return
   try:
@@ -1028,19 +1028,25 @@ def update_db_with_recap(race_name, result_df, memo_text):
     if "レース名" not in df.columns:
       return
 
+    # 着順・馬番マップの構築
     rank_map = {}
     if not result_df.empty and "馬番" in result_df.columns and "確定着順" in result_df.columns:
       for _, row in result_df.iterrows():
         try:
           b_num = int(str(row["馬番"]).strip())
           r_val = str(row["確定着順"]).strip()
-          rank_map[b_num] = r_val
+          if r_val and r_val != "nan":
+            rank_map[b_num] = r_val
         except Exception:
           pass
 
     mask = df["レース名"].astype(str) == str(race_name)
     if not mask.any():
       return
+
+    # 着順列の確実な代入
+    if "確定着順" not in df.columns:
+      df["確定着順"] = ""
 
     def assign_rank(row):
       try:
@@ -1050,11 +1056,14 @@ def update_db_with_recap(race_name, result_df, memo_text):
         return row.get("確定着順", "")
 
     df.loc[mask, "確定着順"] = df[mask].apply(assign_rank, axis=1)
+    
+    if "回顧メモ" not in df.columns:
+      df["回顧メモ"] = ""
     df.loc[mask, "回顧メモ"] = str(memo_text).strip()
 
     df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
   except Exception as e:
-    st.warning(f"⚠️ データベースの回顧プール保存中に注意: {e}")
+    st.warning(f"⚠️ データベースの回顧・着順プール保存中に注意: {e}")
 
 
 def delete_race_from_db(race_name):
@@ -2099,6 +2108,7 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                 res_df[col_name] = res_df[col_name].apply(clean_decimal)
 
+            # 🎯 照合された確定着順をデータベースに確実に反映・保存！
             update_db_with_recap(selected_race, res_df, memo_part)
 
             def highlight_ranks(row):
@@ -2121,7 +2131,7 @@ elif selected_menu == "🔄 回顧・精度検証":
               return [""] * len(row)
 
             st.success(
-                f"🎉 レース「{selected_race}」の全着順照合 ＆ 回顧 ＆ ルール検証が完了し、データベースにプール保存されました！"
+                f"🎉 レース「{selected_race}」の全着順照合 ＆ 回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
             )
 
             st.subheader("🏆 全着順 ＆ 予想照合結果")
@@ -2145,7 +2155,6 @@ elif selected_menu == "🔄 回顧・精度検証":
             else:
               st.warning("⚠️ 新しいルール改修案が提案されました！")
               
-              # ★ 補正部分の枠 ＆ バージョン変更済み全文の枠に綺麗に分割！
               if "---FULL_MERGED_RULE---" in rule_update_clean:
                 diff_summary, full_rule_body = rule_update_clean.split("---FULL_MERGED_RULE---", 1)
               else:
