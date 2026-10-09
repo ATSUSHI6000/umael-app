@@ -227,7 +227,6 @@ def normalize_rank(val):
   s = str(val).strip()
   if not s or s in {"-", "—", "取消", "除外", "中止", "失格", "競走中止"}:
     return ""
-  # 「1」「1着」「１着」など、着順欄そのものの先頭数字だけを採用
   s = s.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
   m = re.match(r"^\s*(\d+)\s*(?:着)?\s*$", s)
   if m:
@@ -481,28 +480,21 @@ def parse_json_ai_output(result_text):
       score_tenkai = safe_int(h.get("score_tenkai", total_score))
       score_baba = safe_int(h.get("score_baba", total_score))
 
-      jiku = (
-          "〇"
-          if str(h.get("jiku", "")).strip() == "〇" or rank_eval in ["S", "S+", "A+"]
-          else ""
-      )
-      注 = (
-          "〇"
-          if str(h.get("注", h.get("chu", ""))).strip() == "〇"
-          or (not jiku and rank_eval == "B")
-          else ""
-      )
-      himo = (
-          "〇"
-          if str(h.get("himo", "")).strip() == "〇"
-          or (not jiku and not 注 and rank_eval in ["A", "A-", "B+"])
-          else ""
-      )
-      kiri = (
-          "〇"
-          if str(h.get("kiri", "")).strip() == "〇" or (not jiku and not himo and not 注)
-          else ""
-      )
+      # 🎯 軸・ヒモ・注・切りの完全排他ロジック（1頭につき必ずどれか1つだけ「〇」）
+      ai_jiku = str(h.get("jiku", "")).strip() == "〇"
+      ai_himo = str(h.get("himo", "")).strip() == "〇"
+      ai_chu = str(h.get("注", h.get("chu", ""))).strip() == "〇"
+      ai_kiri = str(h.get("kiri", "")).strip() == "〇"
+
+      jiku, himo, chu, kiri = "", "", "", ""
+      if ai_jiku or rank_eval in ["S", "S+", "A+"]:
+        jiku = "〇"
+      elif ai_himo or rank_eval in ["A", "A-", "B+"]:
+        himo = "〇"
+      elif ai_chu or rank_eval in ["B", "B-"]:
+        chu = "〇"
+      else:
+        kiri = "〇"
 
       memo = str(h.get("memo", "")).strip()
       if not memo or len(memo) < 10:
@@ -526,7 +518,7 @@ def parse_json_ai_output(result_text):
             "馬場点": score_baba,
             "軸": jiku,
             "ヒモ": himo,
-            "注": 注,
+            "注": chu,
             "切り": kiri,
             "メモ": memo,
         })
@@ -1073,10 +1065,10 @@ def update_db_with_recap(race_name, result_df, memo_text):
         if horse_num:
           result_by_num[horse_num] = result_row
 
-    # 予想時の「評価」列は保持し、レース結果として保存したい列だけを追加・更新する。
+    # 予想時の「評価」「軸」「ヒモ」「注」「切り」等は変更せず保持し、レース結果情報のみ上書き更新
     result_columns = [
         "確定着順", "単勝人気", "確定オッズ", "タイム", "上り3F",
-        "軸ヒモ切り", "勝因・敗因ショートメモ",
+        "勝因・敗因ショートメモ",
     ]
     for col in result_columns + ["回顧メモ"]:
       if col not in df.columns:
@@ -1257,6 +1249,9 @@ def analyze_data_with_gemini(
 ・今回対象レースの「確定出馬表（メイン馬柱スクショまたは確定データ）」に載っている馬です。
 ・馬番が 1 から順番に最後の馬番まで（1, 2, 3...）連続して並んでいる出走馬【全頭】を抽出してください。
 
+★【印の絶対排他規則】：
+各馬に対し、「軸」「ヒモ」「注」「切り」のいずれか【必ず1つだけ】に「〇」を付けてください。同一の馬に2つ以上の「〇」を重複させることは厳禁です。
+
 ★【グループ4：プロ予想・YouTube・Web参考URLのクロスチェック規則】：
 グループ4が含まれている場合は、プロ陣営が本命・穴馬として推奨している馬のコメントや理由を分析に組み込み、総合スコアや『メモ』列の詳細根拠に「※プロ陣営本命推奨」「※プロ陣営注目穴馬」等の補足も含めて反映してください！
 
@@ -1303,6 +1298,7 @@ def analyze_data_with_gemini(
       "score_baba": 馬場点(0-100),
       "jiku": "軸なら〇、違えば空文字",
       "himo": "ヒモなら〇、違えば空文字",
+      "chu": "注なら〇、違えば空文字",
       "kiri": "切りなら〇、違えば空文字",
       "memo": "本命理由・血統・近5走・展開相性・プロ推奨理由などの長文詳細分析メモ"
     }}
@@ -1311,6 +1307,7 @@ def analyze_data_with_gemini(
 
 【最重要遵守事項】
 ・確定出馬表にある1番〜最終馬番まで絶対に途中で切らず【全頭】出力すること。
+・各馬につき「軸」「ヒモ」「注」「切り」のいずれか必ず1つのみに〇を出力し、重複は絶対に避けること。
 ・解説文章や挨拶は一切含めず、純粋なJSONのみを出力すること。
 ・同じ入力データに対しては、常に同一の厳格なロジックで一貫したスコアを算出すること。
 """
@@ -1781,15 +1778,6 @@ if selected_menu == "📋 レース分析・予想":
         and st.session_state["analysis_success_msg"]
     ):
       st.success(st.session_state["analysis_success_msg"])
-      share_race_name = str(st.session_state["analyzed_df"]["レース名"].iloc[0])
-      share_url = (
-          "https://umael-pro.streamlit.app/?race="
-          + urllib.parse.quote(share_race_name, safe="")
-      )
-      st.markdown("**🔗 知人共有用URL（評価画面のみ）**")
-      st.markdown(f"[共有URLを開く]({share_url})")
-      st.code(share_url, language=None)
-      st.caption("このURLを開くと、選択したレースの評価画面を閲覧できます。")
 
     render_race_evaluation_view(
         st.session_state["analyzed_df"], is_viewer_mode=False
@@ -2186,13 +2174,13 @@ elif selected_menu == "🔄 回顧・精度検証":
               )
             else:
               st.warning("⚠️ 新しいルール改修案が提案されました！")
-              
+
               if "---FULL_MERGED_RULE---" in rule_update_clean:
                 diff_summary, full_rule_body = rule_update_clean.split("---FULL_MERGED_RULE---", 1)
               else:
                 diff_summary = rule_update_clean
                 full_rule_body = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
-              
+
               # ① 補正部分の枠（差分サマリー）
               st.markdown("#### 📌 1. 今回の補正・改修部分（バージョン更新内容）")
               st.code(diff_summary.strip(), language="text")
@@ -2250,10 +2238,18 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
     st.divider()
 
     disp_db_df = db_df.copy()
-    
-    # 着順・主要列の表示並び替え（確定着順を先頭付近に配置）
+
+    # 着順・「軸」「ヒモ」「注」「切り」の表示並び替え（確定着順を先頭付近に配置）
     if "確定着順" in disp_db_df.columns:
-      cols_order = ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気"] + [c for c in disp_db_df.columns if c not in ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気", "確定オッズ", "上り3F", "回顧メモ"]]
+      cols_order = [
+          "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+          "軸", "ヒモ", "注", "切り"
+      ] + [
+          c for c in disp_db_df.columns if c not in [
+              "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+              "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ"
+          ]
+      ]
       disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
 
     # 🎨 DBプール画面用の確実な1〜3着カラーハイライト関数
