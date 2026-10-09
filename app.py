@@ -2104,12 +2104,48 @@ elif selected_menu == "🔄 回顧・精度検証":
             clean_tbl = (
                 tbl_part.replace("```tsv", "").replace("```", "").strip()
             )
-            res_df = pd.read_csv(
-                io.StringIO(clean_tbl),
-                sep="\t",
-                dtype=str,
-                on_bad_lines="skip",
-            )
+            # TSVの各行を列数固定で解析する。
+            # 勝因・敗因メモ本文にタブが混入しても、末尾のメモ列へまとめ、
+            # その後ろの列ズレや on_bad_lines による行の欠落を防ぐ。
+            expected_columns = [
+                "確定着順", "馬番", "馬名", "単勝人気", "確定オッズ",
+                "タイム", "上り3F", "評価", "軸ヒモ切り", "勝因・敗因ショートメモ",
+            ]
+            raw_lines = [line for line in clean_tbl.splitlines() if line.strip()]
+            if raw_lines:
+              header = [cell.strip() for cell in raw_lines[0].split("\t")]
+              # ヘッダーが想定フォーマットと異なる場合も、既存の列名を尊重する。
+              parse_columns = header if len(header) == len(expected_columns) else expected_columns
+              parsed_rows = []
+              for line in raw_lines[1:]:
+                cells = line.split("\t", len(parse_columns) - 1)
+                if len(cells) < len(parse_columns):
+                  cells.extend([""] * (len(parse_columns) - len(cells)))
+                elif len(cells) > len(parse_columns):
+                  cells = cells[:len(parse_columns) - 1] + ["\t".join(cells[len(parse_columns) - 1:])]
+                parsed_rows.append(cells)
+              res_df = pd.DataFrame(parsed_rows, columns=parse_columns, dtype=str)
+            else:
+              res_df = pd.DataFrame(columns=expected_columns, dtype=str)
+
+            # AI出力で空欄列のタブが省略され、敗因メモが「軸ヒモ切り」など
+            # 左隣の列へ入った場合だけ、メモ本文を正しい末尾列へ戻す。
+            memo_col = "勝因・敗因ショートメモ"
+            axis_col = "軸ヒモ切り"
+            if memo_col in res_df.columns:
+              for idx in res_df.index:
+                memo_value = str(res_df.at[idx, memo_col]).strip()
+                if memo_value.lower() in {"none", "nan"}:
+                  memo_value = ""
+                if not memo_value:
+                  for source_col in [axis_col, "評価", "上り3F", "タイム", "確定オッズ"]:
+                    if source_col not in res_df.columns:
+                      continue
+                    source_value = str(res_df.at[idx, source_col]).strip()
+                    if source_value.startswith(("【勝因】", "【敗因】")):
+                      res_df.at[idx, memo_col] = source_value
+                      res_df.at[idx, source_col] = ""
+                      break
 
             # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング
             for col_name in ["確定オッズ", "上り3F"]:
