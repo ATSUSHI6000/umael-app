@@ -221,13 +221,18 @@ def normalize_horse_num(val):
 
 
 def normalize_rank(val):
+  """確定着順を安全に正規化。文字列中の別の数字を着順と誤認しない。"""
   if pd.isna(val):
     return ""
   s = str(val).strip()
-  m = re.search(r"\d+", s)
+  if not s or s in {"-", "—", "取消", "除外", "中止", "失格", "競走中止"}:
+    return ""
+  # 「1」「1着」「１着」など、着順欄そのものの先頭数字だけを採用
+  s = s.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+  m = re.match(r"^\s*(\d+)\s*(?:着)?\s*$", s)
   if m:
-    return str(int(m.group(0)))
-  return s
+    return str(int(m.group(1)))
+  return ""
 
 
 # 馬番（1〜20）を丸囲み文字（①〜⑳）に変換する関数
@@ -476,27 +481,28 @@ def parse_json_ai_output(result_text):
       score_tenkai = safe_int(h.get("score_tenkai", total_score))
       score_baba = safe_int(h.get("score_baba", total_score))
 
-      # 印は「軸・ヒモ・注・切り」のうち必ず1つだけに統一する。
-      # 明示された印を優先し、複数指定されていた場合は軸→注→ヒモ→切りの順で1つに絞る。
-      raw_jiku = str(h.get("jiku", "")).strip() in {"〇", "○", "◎", "軸"}
-      raw_himo = str(h.get("himo", "")).strip() in {"〇", "○", "ヒモ"}
-      raw_chu = str(h.get("chu", h.get("注", ""))).strip() in {"〇", "○", "注", "△"}
-      raw_kiri = str(h.get("kiri", "")).strip() in {"〇", "○", "切り", "切"}
-      if raw_jiku or (not (raw_himo or raw_chu or raw_kiri) and rank_eval in ["S", "S+", "A+"]):
-        mark = "軸"
-      elif raw_chu:
-        mark = "注"
-      elif raw_himo or (not raw_kiri and rank_eval in ["A", "A-", "B+", "B"]):
-        mark = "ヒモ"
-      elif raw_kiri:
-        mark = "切り"
-      else:
-        # 既存データやAI出力に印がない場合も空欄にせず「注」で補完
-        mark = "注"
-      jiku = "〇" if mark == "軸" else ""
-      himo = "〇" if mark == "ヒモ" else ""
-      chu = "〇" if mark == "注" else ""
-      kiri = "〇" if mark == "切り" else ""
+      jiku = (
+          "〇"
+          if str(h.get("jiku", "")).strip() == "〇" or rank_eval in ["S", "S+", "A+"]
+          else ""
+      )
+      注 = (
+          "〇"
+          if str(h.get("注", h.get("chu", ""))).strip() == "〇"
+          or (not jiku and rank_eval == "B")
+          else ""
+      )
+      himo = (
+          "〇"
+          if str(h.get("himo", "")).strip() == "〇"
+          or (not jiku and not 注 and rank_eval in ["A", "A-", "B+"])
+          else ""
+      )
+      kiri = (
+          "〇"
+          if str(h.get("kiri", "")).strip() == "〇" or (not jiku and not himo and not 注)
+          else ""
+      )
 
       memo = str(h.get("memo", "")).strip()
       if not memo or len(memo) < 10:
@@ -520,9 +526,8 @@ def parse_json_ai_output(result_text):
             "馬場点": score_baba,
             "軸": jiku,
             "ヒモ": himo,
-            "注": chu,
+            "注": 注,
             "切り": kiri,
-            "軸ヒモ切り": mark,
             "メモ": memo,
         })
 
@@ -1025,27 +1030,6 @@ if "hok_text_val" not in st.session_state:
 def save_to_db(new_df):
   if new_df.empty:
     return load_db()
-  new_df = new_df.copy()
-  # 過去馬DBも評価画面と同じ単一印を保持する。
-  mark_columns = ["軸", "ヒモ", "注", "切り"]
-  for col in mark_columns:
-    if col not in new_df.columns:
-      new_df[col] = ""
-  if "軸ヒモ切り" not in new_df.columns:
-    new_df["軸ヒモ切り"] = ""
-  for idx in new_df.index:
-    existing_label = str(new_df.at[idx, "軸ヒモ切り"]).strip()
-    selected = existing_label if existing_label in mark_columns else ""
-    if not selected:
-      for col in ["軸", "注", "ヒモ", "切り"]:
-        if str(new_df.at[idx, col]).strip() in {"〇", "○", "◎", "△", col}:
-          selected = col
-          break
-    if not selected:
-      selected = "注"
-    for col in mark_columns:
-      new_df.at[idx, col] = "〇" if col == selected else ""
-    new_df.at[idx, "軸ヒモ切り"] = selected
   clean_save_df = new_df.drop(columns=["総合スコアグラフ"], errors="ignore")
   if os.path.exists(DB_FILE):
     try:
@@ -1107,17 +1091,6 @@ def update_db_with_recap(race_name, result_df, memo_text):
             value = result_row.get(col, "")
             if pd.notna(value) and str(value).strip():
               df.at[idx, col] = str(value).strip()
-      # 結果TSV側で印が抜けても、予想時DBの印から必ず補完する。
-      label = str(df.at[idx, "軸ヒモ切り"]).strip()
-      if label not in {"軸", "ヒモ", "注", "切り"}:
-        label = ""
-        for col in ["軸", "ヒモ", "注", "切り"]:
-          if col in df.columns and str(df.at[idx, col]).strip() in {"〇", "○", "◎", "△", col}:
-            label = col
-            break
-        if not label:
-          label = "注"
-        df.at[idx, "軸ヒモ切り"] = label
       df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
     df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
@@ -2043,6 +2016,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                     "評価",
                     "軸",
                     "ヒモ",
+                    "注",
                     "切り",
                     "メモ",
                 ]
@@ -2144,48 +2118,12 @@ elif selected_menu == "🔄 回顧・精度検証":
             clean_tbl = (
                 tbl_part.replace("```tsv", "").replace("```", "").strip()
             )
-            # TSVの各行を列数固定で解析する。
-            # 勝因・敗因メモ本文にタブが混入しても、末尾のメモ列へまとめ、
-            # その後ろの列ズレや on_bad_lines による行の欠落を防ぐ。
-            expected_columns = [
-                "確定着順", "馬番", "馬名", "単勝人気", "確定オッズ",
-                "タイム", "上り3F", "評価", "軸ヒモ切り", "勝因・敗因ショートメモ",
-            ]
-            raw_lines = [line for line in clean_tbl.splitlines() if line.strip()]
-            if raw_lines:
-              header = [cell.strip() for cell in raw_lines[0].split("\t")]
-              # ヘッダーが想定フォーマットと異なる場合も、既存の列名を尊重する。
-              parse_columns = header if len(header) == len(expected_columns) else expected_columns
-              parsed_rows = []
-              for line in raw_lines[1:]:
-                cells = line.split("\t", len(parse_columns) - 1)
-                if len(cells) < len(parse_columns):
-                  cells.extend([""] * (len(parse_columns) - len(cells)))
-                elif len(cells) > len(parse_columns):
-                  cells = cells[:len(parse_columns) - 1] + ["\t".join(cells[len(parse_columns) - 1:])]
-                parsed_rows.append(cells)
-              res_df = pd.DataFrame(parsed_rows, columns=parse_columns, dtype=str)
-            else:
-              res_df = pd.DataFrame(columns=expected_columns, dtype=str)
-
-            # AI出力で空欄列のタブが省略され、敗因メモが「軸ヒモ切り」など
-            # 左隣の列へ入った場合だけ、メモ本文を正しい末尾列へ戻す。
-            memo_col = "勝因・敗因ショートメモ"
-            axis_col = "軸ヒモ切り"
-            if memo_col in res_df.columns:
-              for idx in res_df.index:
-                memo_value = str(res_df.at[idx, memo_col]).strip()
-                if memo_value.lower() in {"none", "nan"}:
-                  memo_value = ""
-                if not memo_value:
-                  for source_col in [axis_col, "評価", "上り3F", "タイム", "確定オッズ"]:
-                    if source_col not in res_df.columns:
-                      continue
-                    source_value = str(res_df.at[idx, source_col]).strip()
-                    if source_value.startswith(("【勝因】", "【敗因】")):
-                      res_df.at[idx, memo_col] = source_value
-                      res_df.at[idx, source_col] = ""
-                      break
+            res_df = pd.read_csv(
+                io.StringIO(clean_tbl),
+                sep="\t",
+                dtype=str,
+                on_bad_lines="skip",
+            )
 
             # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング
             for col_name in ["確定オッズ", "上り3F"]:
