@@ -235,51 +235,6 @@ def normalize_rank(val):
   return ""
 
 
-EVALUATION_MARK_COLUMNS = ["軸", "ヒモ", "注", "切り"]
-
-
-def evaluation_mark_category(eval_value, row=None):
-  """評価ランクを4区分のうち1つだけに対応付ける。"""
-  rank = str(eval_value or "").strip().upper().replace(" ", "")
-  if rank in {"S", "S+", "A+"}:
-    return "軸"
-  if rank in {"A", "A-", "B+"}:
-    return "ヒモ"
-  if rank == "B":
-    return "注"
-  if rank in {"C", "C+", "C-", "D", "E"}:
-    return "切り"
-
-  # 評価ランクが欠落している旧データは、既存印が複数なら優先順で1つに統一。
-  if row is not None:
-    present = [
-        col for col in EVALUATION_MARK_COLUMNS
-        if str(row.get(col, "")).strip() == "〇"
-    ]
-    if len(present) == 1:
-      return present[0]
-    if present:
-      return present[0]
-  return "切り"
-
-
-def enforce_exclusive_evaluation_marks(df):
-  """各馬の評価印を評価ランクと連動させ、4列のうち必ず1列だけ〇にする。"""
-  if df is None or df.empty:
-    return df.copy() if df is not None else pd.DataFrame()
-
-  out = df.copy()
-  for col in EVALUATION_MARK_COLUMNS:
-    if col not in out.columns:
-      out[col] = ""
-
-  for idx, row in out.iterrows():
-    category = evaluation_mark_category(row.get("評価", ""), row)
-    for col in EVALUATION_MARK_COLUMNS:
-      out.at[idx, col] = "〇" if col == category else ""
-  return out
-
-
 # 馬番（1〜20）を丸囲み文字（①〜⑳）に変換する関数
 def convert_to_circled_numbers(text):
   circled_map = {
@@ -473,19 +428,6 @@ def load_db():
   if os.path.exists(DB_FILE):
     try:
       df = pd.read_csv(DB_FILE)
-      # 旧DBに残っている重複印も読み込み時に補正し、CSV本体へ保存する。
-      normalized_df = enforce_exclusive_evaluation_marks(df)
-      mark_cols = EVALUATION_MARK_COLUMNS
-      marks_changed = any(col not in df.columns for col in mark_cols)
-      if not marks_changed:
-        marks_changed = any(
-            df[col].fillna("").astype(str).tolist()
-            != normalized_df[col].fillna("").astype(str).tolist()
-            for col in mark_cols
-        )
-      if marks_changed:
-        normalized_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
-      df = normalized_df
       if "総合スコア" in df.columns:
         df["総合スコア"] = (
             pd.to_numeric(df["総合スコア"], errors="coerce").fillna(0).astype(int)
@@ -539,12 +481,28 @@ def parse_json_ai_output(result_text):
       score_tenkai = safe_int(h.get("score_tenkai", total_score))
       score_baba = safe_int(h.get("score_baba", total_score))
 
-      # 印はAIの個別フラグではなく、評価ランクに連動させて必ず1つだけ付ける。
-      mark_category = evaluation_mark_category(rank_eval, h)
-      jiku = "〇" if mark_category == "軸" else ""
-      himo = "〇" if mark_category == "ヒモ" else ""
-      注 = "〇" if mark_category == "注" else ""
-      kiri = "〇" if mark_category == "切り" else ""
+      jiku = (
+          "〇"
+          if str(h.get("jiku", "")).strip() == "〇" or rank_eval in ["S", "S+", "A+"]
+          else ""
+      )
+      注 = (
+          "〇"
+          if str(h.get("注", h.get("chu", ""))).strip() == "〇"
+          or (not jiku and rank_eval == "B")
+          else ""
+      )
+      himo = (
+          "〇"
+          if str(h.get("himo", "")).strip() == "〇"
+          or (not jiku and not 注 and rank_eval in ["A", "A-", "B+"])
+          else ""
+      )
+      kiri = (
+          "〇"
+          if str(h.get("kiri", "")).strip() == "〇" or (not jiku and not himo and not 注)
+          else ""
+      )
 
       memo = str(h.get("memo", "")).strip()
       if not memo or len(memo) < 10:
@@ -1073,7 +1031,6 @@ def save_to_db(new_df):
   if new_df.empty:
     return load_db()
   clean_save_df = new_df.drop(columns=["総合スコアグラフ"], errors="ignore")
-  clean_save_df = enforce_exclusive_evaluation_marks(clean_save_df)
   if os.path.exists(DB_FILE):
     try:
       old_df = pd.read_csv(DB_FILE)
@@ -1135,12 +1092,6 @@ def update_db_with_recap(race_name, result_df, memo_text):
             if pd.notna(value) and str(value).strip():
               df.at[idx, col] = str(value).strip()
       df.at[idx, "回顧メモ"] = str(memo_text).strip()
-
-    # 回顧・着順反映後も評価表と同じ4区分に統一し、重複〇を残さない。
-    normalized_df = enforce_exclusive_evaluation_marks(df.loc[mask].copy())
-    for idx in normalized_df.index:
-      for col in EVALUATION_MARK_COLUMNS:
-        df.at[idx, col] = normalized_df.at[idx, col]
 
     df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
   except Exception as e:
@@ -1352,7 +1303,6 @@ def analyze_data_with_gemini(
       "score_baba": 馬場点(0-100),
       "jiku": "軸なら〇、違えば空文字",
       "himo": "ヒモなら〇、違えば空文字",
-      "chu": "注なら〇、違えば空文字",
       "kiri": "切りなら〇、違えば空文字",
       "memo": "本命理由・血統・近5走・展開相性・プロ推奨理由などの長文詳細分析メモ"
     }}
@@ -1363,9 +1313,6 @@ def analyze_data_with_gemini(
 ・確定出馬表にある1番〜最終馬番まで絶対に途中で切らず【全頭】出力すること。
 ・解説文章や挨拶は一切含めず、純粋なJSONのみを出力すること。
 ・同じ入力データに対しては、常に同一の厳格なロジックで一貫したスコアを算出すること。
-・各馬の印は「軸」「ヒモ」「注」「切り」の4区分のうち必ず1つだけに「〇」を付け、1頭に複数の「〇」を絶対に付けないこと。
-・印は評価ランクと必ず一致させること：S/S+/A+＝軸、A/A-/B+＝ヒモ、B＝注、C以下・その他の低評価＝切り。
-・「注」欄を省略せず、該当馬には chu＝「〇」を出力すること。
 """
 
   contents_payload = [json_prompt]
