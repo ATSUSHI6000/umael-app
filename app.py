@@ -16,7 +16,7 @@ import streamlit as st
 
 # ページ基本設定
 st.set_page_config(
-    page_title="競馬馬柱解析サイト", page_icon="🏇", layout="wide"
+    page_title="ウマエル解析サイト", page_icon="🏇", layout="wide"
 )
 
 # ファイルパス設定
@@ -426,7 +426,10 @@ def safe_int(val, default=0):
 def load_db():
   if os.path.exists(DB_FILE):
     try:
-      df = pd.read_csv(DB_FILE)
+      df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+      df = df.replace({"None": "", "none": "", "nan": "", "NaN": ""})
+      if "軸ヒモ切り" in df.columns:
+        df = df.drop(columns=["軸ヒモ切り"])
       if "総合スコア" in df.columns:
         df["総合スコア"] = (
             pd.to_numeric(df["総合スコア"], errors="coerce").fillna(0).astype(int)
@@ -555,9 +558,9 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
       else "競馬予想解析"
   )
   view_df = df.drop(
-      columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ"],
+      columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り"],
       errors="ignore",
-  )
+  ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
   honmei_horse = view_df.iloc[0] if not view_df.empty else None
   h_score = (
@@ -889,7 +892,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
 st.markdown(
     """
 <style>
-    /* 🚀 画面幅制限の完全解除 */
+    /* 🚀 画面幅制限の完全解除 ＆ ヘッダー余白（見切れ防止）調整 */
     [data-testid="stAppViewContainer"] {
         width: 100% !important;
     }
@@ -901,7 +904,7 @@ st.markdown(
         width: 98% !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
-        padding-top: 1rem !important;
+        padding-top: 2.5rem !important; /* 🌟 見切れ防止のため上部余白を調整 */
     }
 
     .main { background-color: #080a0f; }
@@ -994,7 +997,7 @@ if "race" in query_params:
 
 
 # --------------------------------------------------
-# 👑 通常モード（アニキ専用管理・解析画面）
+# 👑 通常モード（管理・解析画面）
 # --------------------------------------------------
 
 
@@ -1034,12 +1037,11 @@ if "hok_text_val" not in st.session_state:
 def save_to_db(new_df):
   if new_df.empty:
     return load_db()
-  clean_save_df = new_df.drop(columns=["総合スコアグラフ"], errors="ignore")
+  clean_save_df = new_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り"], errors="ignore")
   if os.path.exists(DB_FILE):
     try:
-      old_df = pd.read_csv(DB_FILE)
-      if "総合スコアグラフ" in old_df.columns:
-        old_df = old_df.drop(columns=["総合スコアグラフ"])
+      old_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+      old_df = old_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り"], errors="ignore")
 
       if "レース名" in new_df.columns and "レース名" in old_df.columns:
         race_n = new_df["レース名"].iloc[0]
@@ -1062,6 +1064,10 @@ def update_db_with_recap(race_name, result_df, memo_text):
     return
   try:
     df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+    df = df.replace({"None": "", "none": "", "nan": "", "NaN": ""})
+    if "軸ヒモ切り" in df.columns:
+      df = df.drop(columns=["軸ヒモ切り"])
+
     if "レース名" not in df.columns:
       return
 
@@ -1361,7 +1367,9 @@ def analyze_data_with_gemini(
         raise e
 
 
-st.title("競馬馬柱解析サイト v2.7")
+# 🌟 ① タイトル変更 ＆ 余白調整（見切れ防止）
+st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
+st.title("ウマエル解析サイト v2.7")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
 )
@@ -1791,6 +1799,12 @@ if selected_menu == "📋 レース分析・予想":
     ):
       st.success(st.session_state["analysis_success_msg"])
 
+      # 🌟 ② 知人共有用URLの追加表示
+      curr_race_name = st.session_state["analyzed_df"]["レース名"].iloc[0]
+      encoded_race = urllib.parse.quote(str(curr_race_name))
+      st.info("🔗 **知人への共有・ポータル閲覧用URL（コピーしてお使いください）:**")
+      st.code(f"https://umael-analyzer.streamlit.app/?race={encoded_race}", language="text")
+
     render_race_evaluation_view(
         st.session_state["analyzed_df"], is_viewer_mode=False
     )
@@ -2143,8 +2157,8 @@ elif selected_menu == "🔄 回顧・精度検証":
                 on_bad_lines="skip",
             )
 
-            # 🛠️ 不要な「軸ヒモ切り」列が含まれていれば完全に除外
-            res_df = res_df.drop(columns=["軸ヒモ切り"], errors="ignore")
+            # 🛠️ ③ 不要な「軸ヒモ切り」列が含まれていれば除外＆「None」クレンジング
+            res_df = res_df.drop(columns=["軸ヒモ切り"], errors="ignore").fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
             # 🛠️ 確定オッズ・上り3Fの小数を自動クレンジング
             for col_name in ["確定オッズ", "上り3F"]:
@@ -2277,7 +2291,10 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     st.divider()
 
-    disp_db_df = db_df.copy()
+    # 🌟 ③ 「None」を完全に消去＆「軸ヒモ切り」列を徹底排除
+    disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
+    if "軸ヒモ切り" in disp_db_df.columns:
+      disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り"])
 
     # 着順・「軸」「ヒモ」「注」「切り」の表示並び替え（確定着順を先頭付近に配置）
     if "確定着順" in disp_db_df.columns:
@@ -2287,7 +2304,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
       ] + [
           c for c in disp_db_df.columns if c not in [
               "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-              "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ"
+              "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り"
           ]
       ]
       disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
