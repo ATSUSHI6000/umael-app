@@ -476,22 +476,27 @@ def parse_json_ai_output(result_text):
       score_tenkai = safe_int(h.get("score_tenkai", total_score))
       score_baba = safe_int(h.get("score_baba", total_score))
 
-      jiku = (
-          "〇"
-          if str(h.get("jiku", "")).strip() == "〇" or rank_eval in ["S", "S+", "A+"]
-          else ""
-      )
-      himo = (
-          "〇"
-          if str(h.get("himo", "")).strip() == "〇"
-          or (not jiku and rank_eval in ["A", "A-", "B+", "B"])
-          else ""
-      )
-      kiri = (
-          "〇"
-          if str(h.get("kiri", "")).strip() == "〇" or (not jiku and not himo)
-          else ""
-      )
+      # 印は「軸・ヒモ・注・切り」のうち必ず1つだけに統一する。
+      # 明示された印を優先し、複数指定されていた場合は軸→注→ヒモ→切りの順で1つに絞る。
+      raw_jiku = str(h.get("jiku", "")).strip() in {"〇", "○", "◎", "軸"}
+      raw_himo = str(h.get("himo", "")).strip() in {"〇", "○", "ヒモ"}
+      raw_chu = str(h.get("chu", h.get("注", ""))).strip() in {"〇", "○", "注", "△"}
+      raw_kiri = str(h.get("kiri", "")).strip() in {"〇", "○", "切り", "切"}
+      if raw_jiku or (not (raw_himo or raw_chu or raw_kiri) and rank_eval in ["S", "S+", "A+"]):
+        mark = "軸"
+      elif raw_chu:
+        mark = "注"
+      elif raw_himo or (not raw_kiri and rank_eval in ["A", "A-", "B+", "B"]):
+        mark = "ヒモ"
+      elif raw_kiri:
+        mark = "切り"
+      else:
+        # 既存データやAI出力に印がない場合も空欄にせず「注」で補完
+        mark = "注"
+      jiku = "〇" if mark == "軸" else ""
+      himo = "〇" if mark == "ヒモ" else ""
+      chu = "〇" if mark == "注" else ""
+      kiri = "〇" if mark == "切り" else ""
 
       memo = str(h.get("memo", "")).strip()
       if not memo or len(memo) < 10:
@@ -515,7 +520,9 @@ def parse_json_ai_output(result_text):
             "馬場点": score_baba,
             "軸": jiku,
             "ヒモ": himo,
+            "注": chu,
             "切り": kiri,
+            "軸ヒモ切り": mark,
             "メモ": memo,
         })
 
@@ -865,6 +872,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         "馬場点": st.column_config.NumberColumn("馬場点", width="small"),
         "軸": st.column_config.TextColumn("軸", width="small"),
         "ヒモ": st.column_config.TextColumn("ヒモ", width="small"),
+        "注": st.column_config.TextColumn("注", width="small"),
         "切り": st.column_config.TextColumn("切り", width="small"),
         "メモ": st.column_config.TextColumn(
             "メモ（詳細分析）", width="large"
@@ -1017,6 +1025,27 @@ if "hok_text_val" not in st.session_state:
 def save_to_db(new_df):
   if new_df.empty:
     return load_db()
+  new_df = new_df.copy()
+  # 過去馬DBも評価画面と同じ単一印を保持する。
+  mark_columns = ["軸", "ヒモ", "注", "切り"]
+  for col in mark_columns:
+    if col not in new_df.columns:
+      new_df[col] = ""
+  if "軸ヒモ切り" not in new_df.columns:
+    new_df["軸ヒモ切り"] = ""
+  for idx in new_df.index:
+    existing_label = str(new_df.at[idx, "軸ヒモ切り"]).strip()
+    selected = existing_label if existing_label in mark_columns else ""
+    if not selected:
+      for col in ["軸", "注", "ヒモ", "切り"]:
+        if str(new_df.at[idx, col]).strip() in {"〇", "○", "◎", "△", col}:
+          selected = col
+          break
+    if not selected:
+      selected = "注"
+    for col in mark_columns:
+      new_df.at[idx, col] = "〇" if col == selected else ""
+    new_df.at[idx, "軸ヒモ切り"] = selected
   clean_save_df = new_df.drop(columns=["総合スコアグラフ"], errors="ignore")
   if os.path.exists(DB_FILE):
     try:
@@ -1078,6 +1107,17 @@ def update_db_with_recap(race_name, result_df, memo_text):
             value = result_row.get(col, "")
             if pd.notna(value) and str(value).strip():
               df.at[idx, col] = str(value).strip()
+      # 結果TSV側で印が抜けても、予想時DBの印から必ず補完する。
+      label = str(df.at[idx, "軸ヒモ切り"]).strip()
+      if label not in {"軸", "ヒモ", "注", "切り"}:
+        label = ""
+        for col in ["軸", "ヒモ", "注", "切り"]:
+          if col in df.columns and str(df.at[idx, col]).strip() in {"〇", "○", "◎", "△", col}:
+            label = col
+            break
+        if not label:
+          label = "注"
+        df.at[idx, "軸ヒモ切り"] = label
       df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
     df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
