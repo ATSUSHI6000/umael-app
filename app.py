@@ -246,13 +246,33 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
     return prompt_text, media_parts
 
 
+def clean_race_name_from_filename(filename):
+    """ファイル名から「競馬新聞」「馬柱」「出馬表」などの余分なノイズを除去して純粋なレース名のみを抽出"""
+    base_name = os.path.splitext(filename)[0]
+    
+    # 除去したい不要なキーワード群
+    noise_patterns = [
+        r"競馬新聞", r"新聞", r"出馬表", r"馬柱", r"確定データ", r"確定",
+        r"過去データ", r"過去", r"傾向", r"回顧", r"データ", r"全ページ", r"印刷"
+    ]
+    
+    cleaned = base_name
+    for pat in noise_patterns:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
+    
+    # 不可文字の置換と連続する記号・空白の整形
+    cleaned = re.sub(r'[\\/*?:"<>|]', "_", cleaned)
+    cleaned = re.sub(r'[_\s\-\—]+', '_', cleaned)
+    cleaned = cleaned.strip('_').strip()
+    
+    return cleaned if cleaned else re.sub(r'[\\/*?:"<>|]', "_", base_name).strip()
+
+
 def detect_simple_race_name(files_g1, files_g2, files_g3):
     for flist in [files_g1, files_g2, files_g3]:
         if flist:
             for f in flist:
-                fname = f.name
-                base_name = os.path.splitext(fname)[0]
-                clean_name = re.sub(r'[\\/*?:"<>|]', "_", base_name).strip()
+                clean_name = clean_race_name_from_filename(f.name)
                 if clean_name:
                     return clean_name
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -263,8 +283,10 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text):
     ensure_drafts_dir()
     if not race_name or not race_name.strip():
         race_name = detect_simple_race_name(files_g1, files_g2, files_g3)
+    else:
+        race_name = clean_race_name_from_filename(race_name)
 
-    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip())
+    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
     os.makedirs(race_dir, exist_ok=True)
 
@@ -300,7 +322,7 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
     if not race_name or not race_name.strip():
         return "", [], "", [], "", [], "", []
 
-    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip())
+    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
 
     if not os.path.exists(race_dir):
@@ -408,7 +430,7 @@ def delete_draft(race_name):
     ensure_drafts_dir()
     if not race_name or not race_name.strip():
         return False
-    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip())
+    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
     if os.path.exists(race_dir):
         shutil.rmtree(race_dir)
@@ -1462,28 +1484,30 @@ if selected_menu == "📋 レース分析・予想":
                 default_idx = existing_drafts.index(st.session_state["selected_draft_race"]) + 1
 
             draft_choice = st.selectbox(
-                "既存の準備中レースを選択する：",
-                ["✨ 【新規レース作成（馬柱からレース名自動判別）】"] + existing_drafts,
+                "📂 保存・編集する対象レースを選択（新規または既存）：",
+                ["✨ 【新規レースとして保存（馬柱からレース名自動判定）】"] + existing_drafts,
                 index=default_idx,
                 key="draft_race_select_box"
             )
-            if (
-                draft_choice
-                == "✨ 【新規レース作成（馬柱からレース名自動判別）】"
-            ):
+            
+            if draft_choice == "✨ 【新規レースとして保存（馬柱からレース名自動判定）】":
                 draft_race_name = st.text_input(
-                    "レース名を入力（※空欄でもアップロードファイルから自動設定されます）",
+                    "✏️ レース名を手動指定する場合（※空欄ならファイル名から自動設定されます）",
                     "",
                 )
+                display_target_name = draft_race_name.strip() if draft_race_name.strip() else "✨ 新規レース（自動判定）"
             else:
                 draft_race_name = draft_choice
+                display_target_name = draft_choice
+
+            st.info(f"🎯 **現在の操作対象:** ` {display_target_name} `")
 
         with draft_col2:
             if draft_race_name and draft_race_name not in [
-                "✨ 【新規レース作成（馬柱からレース名自動判別）】",
+                "✨ 【新規レースとして保存（馬柱からレース名自動判定）】",
                 "",
             ]:
-                st.write("📦 **現在の蓄積状況**")
+                st.write("📦 **選択中レースの蓄積状況**")
                 _, _, _, _, _, _, _, saved_fnames = load_draft_data(draft_race_name)
                 if saved_fnames:
                     st.success(f"保存済みファイル: {len(saved_fnames)}件")
@@ -1591,7 +1615,7 @@ if selected_menu == "📋 レース分析・予想":
                         if (
                             draft_race_name
                             and draft_choice
-                            != "✨ 【新規レース作成（馬柱からレース名自動判別）】"
+                            != "✨ 【新規レースとして保存（馬柱からレース名自動判定）】"
                         )
                         else ""
                     )
@@ -1688,7 +1712,7 @@ if selected_menu == "📋 レース分析・予想":
         with btn_col3:
             if st.button("🗑️ この下書きを削除", use_container_width=True):
                 if draft_race_name and draft_race_name not in [
-                    "✨ 【新規レース作成（馬柱からレース名自動判別）】",
+                    "✨ 【新規レースとして保存（馬柱からレース名自動判定）】",
                     "",
                 ]:
                     with st.spinner("🗑️ 下書きデータを削除中..."):
