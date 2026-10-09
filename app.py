@@ -1006,7 +1006,6 @@ def save_to_db(new_df):
       if "総合スコアグラフ" in old_df.columns:
         old_df = old_df.drop(columns=["総合スコアグラフ"])
 
-      # 同一レース名が存在する場合は既存データを上書き更新
       if "レース名" in new_df.columns and "レース名" in old_df.columns:
         race_n = new_df["レース名"].iloc[0]
         old_df = old_df[old_df["レース名"].astype(str) != str(race_n)]
@@ -1031,7 +1030,6 @@ def update_db_with_recap(race_name, result_df, memo_text):
     if "レース名" not in df.columns:
       return
 
-    # 回顧情報のマップを作成
     rank_map = {}
     if not result_df.empty and "馬番" in result_df.columns and "確定着順" in result_df.columns:
       for _, row in result_df.iterrows():
@@ -1733,7 +1731,7 @@ if selected_menu == "📋 レース分析・予想":
           except Exception as e:
             st.error(f"❌ 解析中にエラーが発生しました:\n{e}")
 
-  # メイン階層描画エリア
+  # 🔗 メイン階層描画エリア（余明な装飾を排したプレーンテキスト形式URL）
   if (
       "analyzed_df" in st.session_state
       and not st.session_state["analyzed_df"].empty
@@ -1744,6 +1742,17 @@ if selected_menu == "📋 レース分析・予想":
         and st.session_state["analysis_success_msg"]
     ):
       st.success(st.session_state["analysis_success_msg"])
+      
+      current_race_n = (
+          st.session_state["analyzed_df"]["レース名"].iloc[0]
+          if "レース名" in st.session_state["analyzed_df"].columns
+          else ""
+      )
+      if current_race_n:
+        share_url = f"https://umael-pro.streamlit.app/?race={current_race_n}"
+        st.write("💡 **知人共有用ポータルURL（右上のボタンでコピー可）：**")
+        st.code(share_url, language="text")
+
     render_race_evaluation_view(
         st.session_state["analyzed_df"], is_viewer_mode=False
     )
@@ -2079,7 +2088,6 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                 res_df[col_name] = res_df[col_name].apply(clean_decimal)
 
-            # 💾 改修ポイント2: 回顧結果をデータベース（プール）に自動更新保存！
             update_db_with_recap(selected_race, res_df, memo_part)
 
             def highlight_ranks(row):
@@ -2126,7 +2134,6 @@ elif selected_menu == "🔄 回顧・精度検証":
             else:
               st.warning("⚠️ ルール改修案が提案されました！")
               
-              # 📋 改修ポイント1: 読み込み中の全ルール＋提案を組み合わせ、右上ワンタップコピー枠を出力！
               full_merged_rule = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
               
               st.write("💡 **以下の枠内（右上コピーボタン）から修正版ルール全文を一括コピーして、「⚙️ ルール管理・アップデート」画面へ貼り付け保存できます：**")
@@ -2179,7 +2186,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     st.divider()
 
-    # 🔗 改修ポイント3: 閲覧専用ダイレクトURL（[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=)...）表示！
     st.subheader("🔗 レース別の知人共有用ポータルURL")
     races_list_all = (
         db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
@@ -2196,10 +2202,8 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
     st.divider()
 
-    # 🐴 改修ポイント4: 確定着順の表示＆ハイライトカラー（1着=金、2着=水色、3着=銅）を自動適用！
     disp_db_df = db_df.copy()
     
-    # 着順データが存在する場合は「確定着順」列を上位に配置
     if "確定着順" in disp_db_df.columns:
       cols_order = ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気"] + [c for c in disp_db_df.columns if c not in ["レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気", "確定オッズ", "上り3F", "回顧メモ"]]
       disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
