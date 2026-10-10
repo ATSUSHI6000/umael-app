@@ -247,10 +247,10 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
 
 
 def clean_race_name_from_filename(filename):
-    """ファイル名から「競馬新聞」「馬柱」「出馬表」などの余分なノイズを除去して純粋なレース名のみを抽出"""
+    """ファイル名から「競馬新聞」「馬柱」「出馬表」、日付・西暦（_2026など）、連番（_2など）の余分なノイズを除去して純粋なレース名のみを抽出"""
     base_name = os.path.splitext(filename)[0]
     
-    # 除去したい不要なキーワード群
+    # 1. 不要なキーワード群の除去
     noise_patterns = [
         r"競馬新聞", r"新聞", r"出馬表", r"馬柱", r"確定データ", r"確定",
         r"過去データ", r"過去", r"傾向", r"回顧", r"データ", r"全ページ", r"印刷"
@@ -259,6 +259,13 @@ def clean_race_name_from_filename(filename):
     cleaned = base_name
     for pat in noise_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
+    
+    # 2. 日付（YYYYMMDD / YYYY）や西暦（202x年/202x）の除去（例: _20261010, 2026, _2026 など）
+    cleaned = re.sub(r'[_\s\-\—]?(?:20\d{2})(?:[01]\d[0-3]\d)?', '', cleaned)
+    
+    # 3. 末尾の連番・枝番（_2, _1, (1), -1 など）の除去
+    cleaned = re.sub(r'[_\s\-\—]\d+$', '', cleaned)
+    cleaned = re.sub(r'\(\d+\)$', '', cleaned)
     
     # 不可文字の置換と連続する記号・空白の整形
     cleaned = re.sub(r'[\\/*?:"<>|]', "_", cleaned)
@@ -1372,10 +1379,198 @@ def analyze_data_with_gemini(
 
 
 # --------------------------------------------------
+# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数
+# --------------------------------------------------
+
+def parse_json_selected_5r(result_text):
+    """勝負5R厳選結果のJSONをパースする"""
+    try:
+        clean_text = result_text.strip()
+        if "```json" in clean_text:
+            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean_text:
+            clean_text = clean_text.split("```")[1].split("```")[0].strip()
+        return json.loads(clean_text)
+    except Exception as e:
+        st.error(f"⚠️ JSONパースエラー: {e}")
+        return None
+
+
+def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_name):
+    """全12Rの下書きデータからメインRマスト＋勝負度上位4Rを選出し、詳細解析を実行する"""
+    client = genai.Client(api_key=api_key)
+
+    all_races_payload_text = ""
+    media_parts_all = []
+
+    for r_name in draft_races_list:
+        t1, p1, t2, p2, t3, p3, t4, _ = load_draft_data(r_name)
+        combined_r_text = f"\n\n=========================================\n【対象レースデータ: {r_name}】\n=========================================\n"
+        combined_r_text += f"{t1}\n{t2}\n{t3}\n{t4}"
+        all_races_payload_text += combined_r_text
+        media_parts_all.extend(p1 + p2 + p3)
+
+    selection_prompt = f"""{rules_text}
+
+【★現地観戦用：全12Rから勝負5R厳選＆全頭分析プロンプト】
+あなたは競馬プロ解析AI「ウマエル」です。
+提供された本日の全12レース（および裏開催重賞）のデータから、本日勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
+
+【厳選5レースの選定絶対条件】
+1. **メインレース（11RまたはG1/G2/G3/Jpn1等の重賞）は【必ず（マストで）】選出に含めること。**
+2. 残りの4レースは、データ・展開・オッズ乖離から「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が高い」レースを厳選すること。
+3. 条件を満たせば、裏開催の重賞レースを選出対象に含めてもよい。
+
+【出力形式】
+必ず以下のJSONフォーマットのみを出力してください（説明文や挨拶は一切不要）。
+
+{{
+  "selected_races_summary": [
+    {{
+      "race_name": "選出されたレース名（例: 20261011_東京11R毎日王冠_G2）",
+      "is_main": true,
+      "reason": "選定理由（例: 本日のメイン重賞かつ軸信頼度Sのためマスト選出）",
+      "confidence": "S (鉄板軸) / A (有力軸) / B (波乱含み)",
+      "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)"
+    }}
+  ],
+  "races_detail": [
+    {{
+      "race_name": "20261011_東京11R毎日王冠_G2",
+      "confidence": "S (鉄板軸)",
+      "risk_level": "★☆☆ (本命堅調)",
+      "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
+      "recommended_tickets": [
+        "【単勝】 ⑤ （馬名）",
+        "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰"
+      ],
+      "horses": [
+        {{
+          "horse_num": 1,
+          "horse_name": "馬名",
+          "pop": "1",
+          "total_score": 92,
+          "eval": "S",
+          "score_shubahyou": 90,
+          "score_kettou": 92,
+          "score_choukyou": 95,
+          "score_kin5so": 90,
+          "score_tenkai": 90,
+          "score_baba": 92,
+          "jiku": "〇",
+          "himo": "",
+          "chu": "",
+          "kiri": "",
+          "memo": "詳細分析メモ"
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+    contents = [selection_prompt + "\n\n" + all_races_payload_text]
+    contents.extend(media_parts_all[:15])
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.0,
+            seed=42,
+        ),
+    )
+    return response.text
+
+
+def render_field_mode_ui(api_key, active_selected_rule, selected_model):
+    """現地観戦モードのメインUI描画"""
+    st.subheader("🏇 現地観戦用モード：全12Rから勝負5Rを厳選分析")
+    st.caption("当日の全12レース（＋裏重賞）を蓄積し、メインレース必須＋勝負期待値の高い4Rを一括抽出します。")
+
+    draft_list = list_draft_races()
+
+    col_left, col_right = st.columns([1, 1.2])
+
+    with col_left:
+        st.markdown("### 📥 1. 当日レースデータの蓄積状況")
+        if draft_list:
+            st.success(f"現在 **{len(draft_list)} レース分** の下書きデータが保存されています。")
+            with st.expander("📂 保存中レース一覧を表示", expanded=True):
+                for r_item in draft_list:
+                    st.write(f"・`{r_item}`")
+        else:
+            st.warning("⚠️ まだ下書き保存されたレースデータがありません。")
+            st.info("💡 「📋 レース分析・予想」の【段階的に下書き保存】機能を使って、1R〜12Rのデータを保存してください。")
+
+    with col_right:
+        st.markdown("### 🔥 2. 勝負レース5R一括判定")
+        st.write("蓄積されたレースデータの中からAIが**「メインレース＋勝負度上位4R」**を自動分析・選出します。")
+        
+        if st.button("🚀 本日の勝負5R（メインR＋厳選4R）を一括判定実行", use_container_width=True, type="primary"):
+            if not api_key:
+                st.error("⚠️ サイドバーで Gemini API Key を設定してください！")
+            elif len(draft_list) < 1:
+                st.warning("⚠️ 下書き保存されたレースデータがありません。")
+            else:
+                with st.spinner("🏇 全レースの期待値・波乱度を分析し、勝負5レースを厳選算出中..."):
+                    try:
+                        raw_json = analyze_12r_and_select_top5(
+                            api_key, active_selected_rule, draft_list, selected_model
+                        )
+                        parsed_data = parse_json_selected_5r(raw_json)
+                        if parsed_data:
+                            st.session_state["field_mode_result"] = parsed_data
+                            st.success("🎉 勝負5レースの厳選・詳細分析が完了しました！")
+                            st.rerun()
+                        else:
+                            st.error("❌ 解析データの生成に失敗しました。再度実行してください。")
+                    except Exception as e:
+                        st.error(f"❌ 解析処理中にエラーが発生しました: {e}")
+
+    if "field_mode_result" in st.session_state and st.session_state["field_mode_result"]:
+        res_data = st.session_state["field_mode_result"]
+        st.divider()
+        st.markdown("## 🎯 本日のウマエル厳選勝負5レース")
+
+        summaries = res_data.get("selected_races_summary", [])
+        sum_cols = st.columns(len(summaries) if summaries else 1)
+        for idx, s in enumerate(summaries):
+            with sum_cols[idx % len(sum_cols)]:
+                badge = "⭐ [メインマスト]" if s.get("is_main") else f"🔥 勝負R {idx+1}"
+                st.markdown(f"#### {badge}")
+                st.markdown(f"**{s.get('race_name')}**")
+                st.caption(f"信頼度: {s.get('confidence')} | 波乱度: {s.get('risk_level')}")
+                st.write(f"💡 {s.get('reason')}")
+
+        st.divider()
+
+        details = res_data.get("races_detail", [])
+        if details:
+            tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
+            tabs = st.tabs(tab_titles)
+
+            for idx, tab in enumerate(tabs):
+                with tab:
+                    r_detail = details[idx]
+                    h_list = r_detail.get("horses", [])
+                    if h_list:
+                        df_r = pd.DataFrame(h_list)
+                        df_r["レース名"] = r_detail.get("race_name", "")
+                        df_r["信頼度"] = r_detail.get("confidence", "")
+                        df_r["波乱度"] = r_detail.get("risk_level", "")
+                        df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
+                        df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
+                        
+                        save_to_db(df_r)
+                        render_race_evaluation_view(df_r, is_viewer_mode=False)
+
+
+# --------------------------------------------------
 # 🧭 UI・画面メイン構成
 # --------------------------------------------------
 
-# 🌟 トースト通知（保存メッセージ等の表示保持）
 if "draft_toast_msg" in st.session_state:
     msg_type, msg_text = st.session_state.pop("draft_toast_msg")
     if msg_type == "success":
@@ -1389,9 +1584,9 @@ if "draft_toast_msg" in st.session_state:
         st.toast(msg_text, icon="❌")
 
 st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
-st.title("ウマエル解析サイト v2.7")
+st.title("ウマエル解析サイト v2.8")
 st.caption(
-    "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール"
+    "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
 )
 
 with st.sidebar:
@@ -1401,6 +1596,7 @@ with st.sidebar:
         "移動する機能を選択してください：",
         [
             "📋 レース分析・予想",
+            "🏇 現地観戦用（勝負5R厳選）",
             "⚙️ ルール管理・アップデート",
             "🔄 回顧・精度検証",
             "🗄 過去馬データベース（プール）",
@@ -1824,6 +2020,30 @@ if selected_menu == "📋 レース分析・予想":
             st.session_state["analyzed_df"], is_viewer_mode=False
         )
 
+elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
+    rule_type = st.radio(
+        "今回適用する評価ルールを選択してください：",
+        [
+            "🏆 G1専用ルール",
+            "🏇 平場・G2・G3専用ルール",
+            "🌾 北海道・洋芝専用ルール",
+        ],
+        horizontal=True,
+    )
+
+    if "G1専用" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+    elif "北海道" in rule_type:
+        active_selected_rule = load_saved_rules(
+            RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
+        )
+    else:
+        active_selected_rule = load_saved_rules(
+            RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
+        )
+
+    render_field_mode_ui(api_key, active_selected_rule, selected_model)
+
 elif selected_menu == "⚙️ ルール管理・アップデート":
     st.subheader("⚙️ 解析ルールの管理・アップデート")
     st.write(
@@ -2234,24 +2454,24 @@ elif selected_menu == "🔄 回顧・精度検証":
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
 
 elif selected_menu == "🗄 過去馬データベース（プール）":
-    st.subheader("🗄️ 過去馬データベース（プール一覧・評価順）")
+    st.subheader("🗄️ 過去馬データベース（プール一覧・レース別閲覧）")
     db_df = load_db()
 
     if not db_df.empty:
         st.success(f"📦 現在 {len(db_df)} 件の解析馬データがプールされています")
 
-        with st.expander("🛠 データベースの削除・整理メニュー", expanded=True):
+        with st.expander("🛠 データベースの削除・整理メニュー", expanded=False):
             col_del_1, col_del_2 = st.columns(2)
 
             with col_del_1:
                 st.markdown("##### 📌 特定のレースデータを削除")
-                races_list = (
+                races_list_del = (
                     db_df["レース名"].unique().tolist()
                     if "レース名" in db_df.columns
                     else []
                 )
                 selected_race_to_del = st.selectbox(
-                    "削除するレースを選択してください", races_list
+                    "削除するレースを選択してください", races_list_del, key="db_del_select"
                 )
                 if st.button("🗑️ 選択したレースを削除する", key="btn_del_race"):
                     if selected_race_to_del:
@@ -2274,21 +2494,23 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
         st.divider()
 
+        all_races_in_db = (
+            db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+        )
+        race_selector_options = ["🌐 すべてのレース（全件一括表示）"] + all_races_in_db
+
+        selected_db_race = st.selectbox(
+            "📂 表示・閲覧するレースを選択してください：",
+            race_selector_options,
+            index=0,
+            key="db_race_filter_selectbox",
+        )
+
+        st.write("")
+
         disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
         if "軸ヒモ切り" in disp_db_df.columns:
             disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り"])
-
-        if "確定着順" in disp_db_df.columns:
-            cols_order = [
-                "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                "軸", "ヒモ", "注", "切り"
-            ] + [
-                c for c in disp_db_df.columns if c not in [
-                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                    "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り"
-                ]
-            ]
-            disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
 
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
@@ -2305,36 +2527,97 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "馬番": st.column_config.NumberColumn("馬番", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
                 "総合スコア", format="%d点", min_value=0, max_value=100
-            )
+            ),
+            "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
 
-        search_race = st.text_input("🔍 レース名で検索", "")
-        if search_race:
-            filtered_df = disp_db_df[
-                disp_db_df["レース名"].astype(str).str.contains(search_race, na=False)
+        if selected_db_race != "🌐 すべてのレース（全件一括表示）":
+            filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
+            
+            st.markdown(f"### 🏇 【{selected_db_race}】 解析データ（出走頭数: {len(filtered_df)}頭）")
+
+            single_race_cols = [
+                c for c in [
+                    "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                    "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
+                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                    "勝因・敗因ショートメモ", "メモ"
+                ] if c in filtered_df.columns
             ]
+            disp_single_df = filtered_df[single_race_cols]
+
             st.dataframe(
-                filtered_df.style.apply(db_highlight_ranks, axis=1),
-                column_config=db_col_config,
-                use_container_width=True,
-                height=500,
-                hide_index=True,
-            )
-        else:
-            st.dataframe(
-                disp_db_df.style.apply(db_highlight_ranks, axis=1),
+                disp_single_df.style.apply(db_highlight_ranks, axis=1),
                 column_config=db_col_config,
                 use_container_width=True,
                 height=500,
                 hide_index=True,
             )
 
-        csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(
-            label="📥 データベースをCSVでダウンロード",
-            data=csv_data,
-            file_name="race_all_database.csv",
-            mime="text/csv",
-        )
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                single_csv_data = filtered_df.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    label=f"📥 「{selected_db_race}」のみCSVダウンロード",
+                    data=single_csv_data,
+                    file_name=f"{selected_db_race}_database.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with dl_col2:
+                all_csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    label="📦 全データベース（一括）CSVダウンロード",
+                    data=all_csv_data,
+                    file_name="race_all_database.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        else:
+            st.markdown("### 🌐 プール済み全レース・全頭一覧")
+            
+            if "確定着順" in disp_db_df.columns:
+                cols_order = [
+                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                    "軸", "ヒモ", "注", "切り"
+                ] + [
+                    c for c in disp_db_df.columns if c not in [
+                        "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                        "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り"
+                    ]
+                ]
+                disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
+
+            search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
+            if search_race:
+                mask = (
+                    disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) |
+                    disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
+                )
+                filtered_all_df = disp_db_df[mask]
+                st.dataframe(
+                    filtered_all_df.style.apply(db_highlight_ranks, axis=1),
+                    column_config=db_col_config,
+                    use_container_width=True,
+                    height=500,
+                    hide_index=True,
+                )
+            else:
+                st.dataframe(
+                    disp_db_df.style.apply(db_highlight_ranks, axis=1),
+                    column_config=db_col_config,
+                    use_container_width=True,
+                    height=500,
+                    hide_index=True,
+                )
+
+            csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📦 データベースをCSVで一括ダウンロード",
+                data=csv_data,
+                file_name="race_all_database.csv",
+                mime="text/csv",
+            )
     else:
         st.info("💡 まだプールされたデータはありません。")
