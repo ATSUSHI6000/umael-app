@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import time
+import unicodedata
 import urllib.request
 import urllib.parse
 from google import genai
@@ -246,6 +247,33 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
     return prompt_text, media_parts
 
 
+def normalize_race_name_for_comparison(name):
+    """比較用に全角/半角を統一し、スペース・記号・アルファベット小文字化して標準キーを作成"""
+    if not name:
+        return ""
+    # NFKC正規化（全角英数字・記号・カナ等の統一）
+    s = unicodedata.normalize('NFKC', str(name))
+    # 小文字化
+    s = s.lower()
+    # 空白（全角半角スペース・タブ）の除去
+    s = re.sub(r'\s+', '', s)
+    # 記号・アンダースコア・ハイフン・括弧類の除去
+    s = re.sub(r'[_\-\–\—\(\)（）\[\]【】]', '', s)
+    return s
+
+
+def find_matching_existing_draft(target_race_name):
+    """既存の下書きリストの中から表記揺れを吸収して合致するフォルダ名（既存レース名）を検索"""
+    existing_races = list_draft_races()
+    target_key = normalize_race_name_for_comparison(target_race_name)
+    if not target_key:
+        return None
+    for existing_race in existing_races:
+        if normalize_race_name_for_comparison(existing_race) == target_key:
+            return existing_race
+    return None
+
+
 def clean_race_name_from_filename(filename):
     """ファイル名から「競馬新聞」「馬柱」「出馬表」、日付・西暦（_2026など）、連番（_2など）の余分なノイズを除去して純粋なレース名のみを抽出"""
     base_name = os.path.splitext(filename)[0]
@@ -293,7 +321,14 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text):
     else:
         race_name = clean_race_name_from_filename(race_name)
 
-    sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
+    # 表記揺れを吸収して既存の同一レース下書きフォルダが存在するか照合
+    matched_existing_race = find_matching_existing_draft(race_name)
+    if matched_existing_race:
+        # 既存下書きが存在すればそちらの名称（フォルダ名）に統合保存
+        sanitized_name = matched_existing_race
+    else:
+        sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
+
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
     os.makedirs(race_dir, exist_ok=True)
 
