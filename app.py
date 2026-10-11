@@ -1085,13 +1085,14 @@ st.markdown(
     .main { background-color: #080a0f; }
     h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
 
+    /* ★ 総合スコア（ProgressColumn）のバーカラー設定（指定色: #0bce0e） */
     div[data-testid="stDataFrame"] div[role="progressbar"] {
         height: 14px !important;
         border-radius: 4px !important;
         background-color: #1e2638 !important;
     }
     div[data-testid="stDataFrame"] div[role="progressbar"] > div {
-        background: linear-gradient(90deg, #107c41 0%, #21a366 100%) !important;
+        background: #0bce0e !important;
         border-radius: 4px !important;
     }
     
