@@ -583,6 +583,8 @@ def load_db():
             df = df.replace({"None": "", "none": "", "nan": "", "NaN": ""})
             if "軸ヒモ切り" in df.columns:
                 df = df.drop(columns=["軸ヒモ切り"])
+            if "人気" in df.columns:
+                df = df.drop(columns=["人気"])
             if "総合スコア" in df.columns:
                 df["総合スコア"] = (
                     pd.to_numeric(df["総合スコア"], errors="coerce").fillna(0).astype(int)
@@ -1206,11 +1208,11 @@ if "uploader_key_ver" not in st.session_state:
 def save_to_db(new_df):
     if new_df.empty:
         return load_db()
-    clean_save_df = new_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り"], errors="ignore")
+    clean_save_df = new_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り", "人気"], errors="ignore")
     if os.path.exists(DB_FILE):
         try:
             old_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
-            old_df = old_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り"], errors="ignore")
+            old_df = old_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り", "人気"], errors="ignore")
 
             if "レース名" in new_df.columns and "レース名" in old_df.columns:
                 race_n = new_df["レース名"].iloc[0]
@@ -1235,6 +1237,8 @@ def update_db_with_recap(race_name, result_df, memo_text):
         df = df.replace({"None": "", "none": "", "nan": "", "NaN": ""})
         if "軸ヒモ切り" in df.columns:
             df = df.drop(columns=["軸ヒモ切り"])
+        if "人気" in df.columns:
+            df = df.drop(columns=["人気"])
 
         if "レース名" not in df.columns:
             return
@@ -1251,7 +1255,7 @@ def update_db_with_recap(race_name, result_df, memo_text):
                     result_by_num[horse_num] = result_row
 
         result_columns = [
-            "確定着順", "人気", "単勝人気", "確定オッズ", "タイム", "上り3F",
+            "確定着順", "単勝人気", "確定オッズ", "タイム", "上り3F",
             "勝因・敗因ショートメモ",
         ]
         for col in result_columns + ["回顧メモ"]:
@@ -1264,10 +1268,9 @@ def update_db_with_recap(race_name, result_df, memo_text):
             if result_row is not None:
                 pop_val = result_row.get("単勝人気", result_row.get("人気", ""))
                 if pd.notna(pop_val) and str(pop_val).strip():
-                    df.at[idx, "人気"] = str(pop_val).strip()
                     df.at[idx, "単勝人気"] = str(pop_val).strip()
                 for col in result_columns:
-                    if col in result_df.columns and col not in ["人気", "単勝人気"]:
+                    if col in result_df.columns and col != "単勝人気":
                         value = result_row.get(col, "")
                         if pd.notna(value) and str(value).strip():
                             df.at[idx, col] = str(value).strip()
@@ -2452,7 +2455,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                             on_bad_lines="skip",
                         )
 
-                        res_df = res_df.drop(columns=["軸ヒモ切り"], errors="ignore").fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
+                        res_df = res_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore").fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
                         for col_name in ["確定オッズ", "上り3F"]:
                             if col_name in res_df.columns:
@@ -2594,8 +2597,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         st.write("")
 
         disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
-        if "軸ヒモ切り" in disp_db_df.columns:
-            disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り"])
+        disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
 
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
@@ -2610,7 +2612,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         db_col_config = {
             "確定着順": st.column_config.TextColumn("着順", width="small"),
             "馬番": st.column_config.NumberColumn("馬番", width="small"),
-            "人気": st.column_config.TextColumn("人気", width="small"),
+            "単勝人気": st.column_config.TextColumn("単勝人気", width="small"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
                 "総合スコア", format="%d点", min_value=0, max_value=100
@@ -2627,7 +2629,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 c for c in [
                     "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                     "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
-                    "軸", "ヒモ", "注", "切り", "人気", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
                     "勝因・敗因ショートメモ", "メモ"
                 ] if c in filtered_df.columns
             ]
@@ -2670,11 +2672,13 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             if "確定着順" in disp_db_df.columns:
                 cols_order = [
                     "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                    "軸", "ヒモ", "注", "切り"
+                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                    "勝因・敗因ショートメモ", "メモ"
                 ] + [
                     c for c in disp_db_df.columns if c not in [
                         "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                        "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り", "人気"
+                        "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                        "勝因・敗因ショートメモ", "メモ", "回顧メモ", "軸ヒモ切り", "人気"
                     ]
                 ]
                 disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
