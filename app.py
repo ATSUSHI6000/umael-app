@@ -275,27 +275,32 @@ def find_matching_existing_draft(target_race_name):
 
 
 def clean_race_name_from_filename(filename):
-    """ファイル名から「競馬新聞」「競馬新」「馬柱」「出馬表」、日付・西暦（_2026など）、連番（_2など）の余分なノイズを除去して純粋なレース名のみを抽出"""
+    """ファイル名から「競馬新聞」「競馬新」「馬柱」「出馬表」、日付・西暦（_2026など）、連番（_2など）の余分なノイズを除去して純粋な正式レース名のみを抽出"""
+    if not filename:
+        return ""
+    
+    # 拡張子の除去
     base_name = os.path.splitext(filename)[0]
     
-    # 1. 不要なキーワード群の除去（「競馬新」「競馬新聞」等を確実に削除）
+    # 1. NFKC正規化（全角/半角の統一、濁点・半濁点・結合文字の正常化で途切れ防止）
+    cleaned = unicodedata.normalize('NFKC', base_name)
+    
+    # 2. 不要なキーワード群の除去（単語として正確に置換）
     noise_patterns = [
         r"競馬新聞", r"競馬新", r"新聞", r"出馬表", r"馬柱", r"確定データ", r"確定",
         r"過去データ", r"過去", r"傾向", r"回顧", r"データ", r"全ページ", r"印刷"
     ]
-    
-    cleaned = base_name
     for pat in noise_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
     
-    # 2. 日付（YYYYMMDD / YYYY）や西暦（202x年/202x）の除去（例: _20261010, 2026, _2026 など）
+    # 3. 日付（YYYYMMDD / YYYY）や西暦（例: _20261011, _2026, 2026 など）の除去
     cleaned = re.sub(r'[_\s\-\—]?(?:20\d{2})(?:[01]\d[0-3]\d)?', '', cleaned)
     
-    # 3. 末尾の連番・枝番（_2, _1, (1), -1 など）の除去
+    # 4. 末尾の連番・枝番（_2, _1, -2, (1) など）の除去
     cleaned = re.sub(r'[_\s\-\—]\d+$', '', cleaned)
     cleaned = re.sub(r'\(\d+\)$', '', cleaned)
     
-    # 不可文字の置換と連続する記号・空白の整形
+    # 5. 不可文字の置換と連続する記号・アンダースコア・空白の整形
     cleaned = re.sub(r'[\\/*?:"<>|]', "_", cleaned)
     cleaned = re.sub(r'[_\s\-\—]+', '_', cleaned)
     cleaned = cleaned.strip('_').strip()
