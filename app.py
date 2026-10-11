@@ -704,19 +704,28 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         st.warning("⚠️ 表示できる解析データがありません。再度分析を実行してください。")
         return
 
+    # ★ 空行・無効行の完全自動除外（馬名が空の行や完全NaN行を除去）
+    df = df[df["馬名"].astype(str).str.strip() != ""].dropna(how="all").reset_index(drop=True)
+    if df.empty:
+        st.warning("⚠️ 有効な出走馬データが見つかりませんでした。")
+        return
+
     race_title = (
         df["レース名"].iloc[0]
         if "レース名" in df.columns and not df.empty
         else "競馬予想解析"
     )
     
-    # 不要カラムの削除（「人気」カラムを確実にドロップ）
+    # 不要カラムの削除（「人気」カラムをドロップ）
     view_df = df.drop(
         columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気"],
         errors="ignore",
     ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
-    # カラム並び順の固定・明示的定義（「評価」の直後に「予想人気」を配置）
+    # 空行の二重チェック
+    view_df = view_df[view_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+
+    # カラム並び順の固定（「評価」の直後に「予想人気」を配置）
     target_order = [
         "馬番", "馬名", "総合スコア", "評価", "予想人気",
         "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
@@ -958,20 +967,25 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
+            # サマリーグループテーブルも頭数に応じて動的フィット高さ調整
+            top_height = min(300, (len(top_group) + 1) * 35 + 38)
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
             st.dataframe(
                 top_group,
                 column_config=col_config_sum,
                 use_container_width=True,
+                height=top_height,
                 hide_index=True,
             )
 
             if not sub_group.empty:
+                sub_height = min(400, (len(sub_group) + 1) * 35 + 38)
                 st.write("🟡 **相手紐・穴馬グループ**")
                 st.dataframe(
                     sub_group,
                     column_config=col_config_sum,
                     use_container_width=True,
+                    height=sub_height,
                     hide_index=True,
                 )
 
@@ -1037,11 +1051,14 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             ),
         }
 
+        # ★ 出走頭数に応じたテーブル高さの動的自動フィット計算（1行約35px + ヘッダー38px、上限600px）
+        calc_table_height = min(600, (len(view_df) + 1) * 35 + 38)
+
         st.dataframe(
             view_df,
             column_config=col_config_detail,
             use_container_width=True,
-            height=600,
+            height=calc_table_height,
             hide_index=True,
         )
 
@@ -1425,7 +1442,7 @@ def analyze_data_with_gemini(
 
 
 # --------------------------------------------------
-# 🏇 現地観戦用（全12R・勝補5R厳選）ヘルパー関数
+# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数
 # --------------------------------------------------
 
 def parse_json_selected_5r(result_text):
@@ -2460,11 +2477,12 @@ elif selected_menu == "🔄 回顧・精度検証":
                             f"🎉 レース「{selected_race}」の全着順照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                         )
 
+                        calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
                         st.subheader("🏆 全着順 ＆ 予想照合結果")
                         st.dataframe(
                             res_df.style.hide(axis="index").apply(highlight_ranks, axis=1),
                             use_container_width=True,
-                            height=450,
+                            height=calc_res_height,
                             hide_index=True,
                         )
 
@@ -2598,12 +2616,15 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 ] if c in filtered_df.columns
             ]
             disp_single_df = filtered_df[single_race_cols]
+            disp_single_df = disp_single_df[disp_single_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+
+            calc_db_single_height = min(600, (len(disp_single_df) + 1) * 35 + 38)
 
             st.dataframe(
                 disp_single_df.style.apply(db_highlight_ranks, axis=1),
                 column_config=db_col_config,
                 use_container_width=True,
-                height=500,
+                height=calc_db_single_height,
                 hide_index=True,
             )
 
@@ -2649,19 +2670,23 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
                 )
                 filtered_all_df = disp_db_df[mask]
+                filtered_all_df = filtered_all_df[filtered_all_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+                calc_all_height = min(600, (len(filtered_all_df) + 1) * 35 + 38)
                 st.dataframe(
                     filtered_all_df.style.apply(db_highlight_ranks, axis=1),
                     column_config=db_col_config,
                     use_container_width=True,
-                    height=500,
+                    height=calc_all_height,
                     hide_index=True,
                 )
             else:
+                disp_db_df = disp_db_df[disp_db_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+                calc_all_height = min(600, (len(disp_db_df) + 1) * 35 + 38)
                 st.dataframe(
                     disp_db_df.style.apply(db_highlight_ranks, axis=1),
                     column_config=db_col_config,
                     use_container_width=True,
-                    height=500,
+                    height=calc_all_height,
                     hide_index=True,
                 )
 
