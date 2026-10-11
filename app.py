@@ -662,10 +662,9 @@ def parse_json_ai_output(result_text):
                     "確定着順": "",
                     "馬番": h_num,
                     "馬名": h_name,
-                    "人気": "",
-                    "予想人気": pop_val,
                     "総合スコア": total_score,
                     "評価": rank_eval,
+                    "予想人気": pop_val,
                     "出馬表点": score_shubahyou,
                     "血統点": score_kettou,
                     "調教点": score_choukyou,
@@ -710,10 +709,22 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         if "レース名" in df.columns and not df.empty
         else "競馬予想解析"
     )
+    
+    # 不要カラムの削除（「人気」カラムを確実にドロップ）
     view_df = df.drop(
-        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り"],
+        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気"],
         errors="ignore",
     ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
+
+    # カラム並び順の固定・明示的定義（「評価」の直後に「予想人気」を配置）
+    target_order = [
+        "馬番", "馬名", "総合スコア", "評価", "予想人気",
+        "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
+        "軸", "ヒモ", "注", "切り", "メモ"
+    ]
+    existing_cols = [c for c in target_order if c in view_df.columns]
+    other_cols = [c for c in view_df.columns if c not in target_order]
+    view_df = view_df[existing_cols + other_cols]
 
     honmei_horse = view_df.iloc[0] if not view_df.empty else None
     h_score = (
@@ -1414,7 +1425,7 @@ def analyze_data_with_gemini(
 
 
 # --------------------------------------------------
-# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数
+# 🏇 現地観戦用（全12R・勝補5R厳選）ヘルパー関数
 # --------------------------------------------------
 
 def parse_json_selected_5r(result_text):
@@ -1820,7 +1831,7 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group3,
                                 urls_group4_input,
                             )
-                            # ★ 下書き保存成功時：アップローダーの動的キーをインクリメントして初期化（クリア）
+                            # 下書き保存成功時：アップローダーの動的キーをインクリメントして初期化（クリア）
                             st.session_state["uploader_key_ver"] += 1
                             st.session_state["selected_draft_race"] = actual_draft_name
                             st.session_state["draft_toast_msg"] = (
@@ -2580,9 +2591,9 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
             single_race_cols = [
                 c for c in [
-                    "確定着順", "馬番", "馬名", "総合スコア", "評価", "人気", "予想人気",
+                    "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                     "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
-                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                    "軸", "ヒモ", "注", "切り", "人気", "単勝人気", "確定オッズ", "タイム", "上り3F",
                     "勝因・敗因ショートメモ", "メモ"
                 ] if c in filtered_df.columns
             ]
@@ -2621,12 +2632,12 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             
             if "確定着順" in disp_db_df.columns:
                 cols_order = [
-                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "人気", "予想人気",
+                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                     "軸", "ヒモ", "注", "切り"
                 ] + [
                     c for c in disp_db_df.columns if c not in [
-                        "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "人気", "予想人気",
-                        "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り"
+                        "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                        "軸", "ヒモ", "注", "切り", "確定オッズ", "上り3F", "回顧メモ", "軸ヒモ切り", "人気"
                     ]
                 ]
                 disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
