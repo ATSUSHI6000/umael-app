@@ -15,9 +15,9 @@ import pdfplumber
 import pypdf
 import streamlit as st
 
-# ページ基本設定
+# ページ基本設定（Ver 2.9 に更新）
 st.set_page_config(
-    page_title="ウマエル解析サイト", page_icon="🏇", layout="wide"
+    page_title="ウマエルプロ Ver 2.9", page_icon="🏇", layout="wide"
 )
 
 # ファイルパス設定
@@ -49,6 +49,14 @@ def list_draft_races():
 
 
 def load_api_key():
+    # 1. st.secrets から優先取得
+    try:
+        if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"].strip():
+            return st.secrets["GEMINI_API_KEY"].strip()
+    except Exception:
+        pass
+
+    # 2. 保存ファイルから取得
     if os.path.exists(API_KEY_FILE):
         try:
             with open(API_KEY_FILE, "r", encoding="utf-8") as f:
@@ -248,7 +256,6 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
 
 
 def normalize_race_name_for_comparison(name):
-    """比較用に全角/半角を統一し、スペース・記号・アルファベット小文字化して標準キーを作成"""
     if not name:
         return ""
     s = unicodedata.normalize('NFKC', str(name))
@@ -259,7 +266,6 @@ def normalize_race_name_for_comparison(name):
 
 
 def find_matching_existing_draft(target_race_name):
-    """既存の下書きリストの中から表記揺れを吸収して合致するフォルダ名（既存レース名）を検索"""
     existing_races = list_draft_races()
     target_key = normalize_race_name_for_comparison(target_race_name)
     if not target_key:
@@ -271,7 +277,6 @@ def find_matching_existing_draft(target_race_name):
 
 
 def clean_race_name_from_filename(filename):
-    """ファイル名からノイズキーワードを除去して純粋な正式レース名のみを抽出"""
     if not filename:
         return ""
     
@@ -701,12 +706,93 @@ def parse_json_ai_output(result_text):
     return df
 
 
-def render_race_evaluation_view(df, is_viewer_mode=False):
+# --------------------------------------------------
+# 💬 Gemini API 連携 ウマエルAIチャットUI
+# --------------------------------------------------
+
+def render_umael_chat_ui(df, race_title):
+    st.divider()
+    st.subheader(f"💬 ウマエルAIチャット（【{race_title}】分析・質問）")
+    st.caption("このレースの印・各評価点・血統・展開データをもとに、ウマエルAIが多角的な根拠でお答えします！")
+
+    # レースごとのチャット履歴を session_state に保持
+    sanitized_title = re.sub(r'\W+', '_', race_title)
+    chat_key = f"chat_history_{sanitized_title}"
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = []
+
+    # APIキーの取得（st.secrets 優先）
+    gemini_key = load_api_key()
+
+    # これまでの会話履歴の表示
+    for msg in st.session_state[chat_key]:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    # ユーザー入力メッセージ受け取り
+    user_input = st.chat_input(f"「{race_title}」についてウマエルAIに質問する...")
+
+    if user_input:
+        st.session_state[chat_key].append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.write(user_input)
+
+        if not gemini_key:
+            with st.chat_message("assistant"):
+                st.error("⚠️ Gemini API Key が読み込めません。`st.secrets[\"GEMINI_API_KEY\"]` またはサイドバーのシステム設定で API Key を設定してください！")
+            return
+
+        with st.chat_message("assistant"):
+            with st.spinner("🏇 ウマエルAIがレースデータを全頭チェックして回答中..."):
+                try:
+                    # 背景コンテキスト作成
+                    cols_to_include = [c for c in ["馬番", "馬名", "総合スコア", "評価", "予想人気", "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り", "メモ"] if c in df.columns]
+                    race_context_str = df[cols_to_include].to_string(index=False)
+
+                    system_instruction = f"""あなたは頼れる競馬AIプロフェッショナル「ウマエル」です。
+ユーザー（アニキ）からの質問に対し、以下の対象レースの全頭評価データ（総合スコア、評価、各種評価点、印、詳細分析メモ等）を客観的・多角的な根拠として分析し、親しみやすく頼もしい口調で的確に回答してください。
+
+【対象レース名】: {race_title}
+【対象レース全頭評価データ】:
+{race_context_str}
+
+【回答ルール・ペルソナ】:
+- 「アニキ」と呼びかけ、頼もしく誠実・丁寧に回答してください。
+- 総合スコア、血統点、調教点、展開点、近5走点、馬場点などの具体的数値や評価メモを根拠として挙げてください。
+- ポイントを分かりやすくまとめて説明してください。
+"""
+
+                    # 過去の会話履歴の整形
+                    history_text = ""
+                    for m in st.session_state[chat_key][:-1]:
+                        role_name = "アニキ (ユーザー)" if m["role"] == "user" else "ウマエル (AI)"
+                        history_text += f"{role_name}: {m['content']}\n"
+
+                    full_prompt = f"{system_instruction}\n\n【これまでの会話履歴】:\n{history_text}\n\nアニキの最新の質問: {user_input}"
+
+                    client = genai.Client(api_key=gemini_key)
+                    response = client.models.generate_content(
+                        model="gemini-3.8-flash",
+                        contents=[full_prompt],
+                        config=types.GenerateContentConfig(
+                            temperature=0.3,
+                            seed=42,
+                        ),
+                    )
+
+                    ai_reply = response.text
+                    st.write(ai_reply)
+                    st.session_state[chat_key].append({"role": "assistant", "content": ai_reply})
+
+                except Exception as e:
+                    st.error(f"❌ チャット処理中にエラーが発生しました: {e}")
+
+
+def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
     if df.empty:
         st.warning("⚠️ 表示できる解析データがありません。再度分析を実行してください。")
         return
 
-    # 空行・無効行の完全自動除外（馬名が空の行や完全NaN行を除去）
     df = df[df["馬名"].astype(str).str.strip() != ""].dropna(how="all").reset_index(drop=True)
     if df.empty:
         st.warning("⚠️ 有効な出走馬データが見つかりませんでした。")
@@ -718,16 +804,13 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         else "競馬予想解析"
     )
     
-    # 不要カラムの削除（「人気」カラムをドロップ）
     view_df = df.drop(
         columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気"],
         errors="ignore",
     ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
-    # 空行の二重チェック
     view_df = view_df[view_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
 
-    # カラム並び順の固定（「評価」の直後に「予想人気」を配置）
     target_order = [
         "馬番", "馬名", "総合スコア", "評価", "予想人気",
         "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
@@ -853,6 +936,14 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             f"【3連複 軸1頭流し】 {h_num} － {aite_str}",
         ]
 
+    # ★ 可変共有専用URLの生成・表示
+    encoded_race = urllib.parse.quote(str(race_title))
+    share_url = f"https://umael-analyzer.streamlit.app/?mode=share&race={encoded_race}"
+
+    if not is_viewer_mode:
+        st.info("🔗 **レース名入り評価結果 専用共有URL（コピーして共有できます）:**")
+        st.code(share_url, language="text")
+
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
     )
@@ -969,7 +1060,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
-            # サマリーグループテーブルの高さ動的調整
             top_height = min(300, (len(top_group) + 1) * 35 + 38)
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
             st.dataframe(
@@ -1053,7 +1143,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             ),
         }
 
-        # 出走頭数に応じたテーブル高さの動的自動フィット計算（1行約35px + ヘッダー38px、上限600px）
         calc_table_height = min(600, (len(view_df) + 1) * 35 + 38)
 
         st.dataframe(
@@ -1063,6 +1152,10 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             height=calc_table_height,
             hide_index=True,
         )
+
+    # チャットUIの描画
+    if show_chat:
+        render_umael_chat_ui(df, race_title)
 
 
 st.markdown(
@@ -1149,16 +1242,41 @@ st.markdown(
 )
 
 
+# ★ クエリパラメータ（共有表示モード・個別参照）のチェック
 query_params = st.query_params
+mode_param = query_params.get("mode", "")
+race_param = query_params.get("race", "")
 
-if "race" in query_params:
+if mode_param == "share" and race_param:
+    # サイドバーおよび不要ヘッダーの完全非表示化スタイルを適用
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] { display: none !important; }
+        div[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        .main .block-container { max-width: 100% !important; padding-top: 1rem !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    db_df = load_db()
+    if not db_df.empty and "レース名" in db_df.columns:
+        matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
+        if not matched_df.empty:
+            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+        else:
+            st.error(f"⚠️ レース「{race_param}」の解析データは見つかりませんでした。")
+    else:
+        st.error("⚠️ データベースに予想データが登録されていません。")
+
+    st.stop()
+
+elif "race" in query_params and not mode_param:
     target_race_param = query_params["race"]
     db_df = load_db()
 
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(target_race_param)]
         if not matched_df.empty:
-            render_race_evaluation_view(matched_df, is_viewer_mode=True)
+            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
         else:
             st.error(
                 f"⚠️ レース「{target_race_param}」の解析データは見つかりませんでした。"
@@ -1201,7 +1319,6 @@ if "hok_text_val" not in st.session_state:
         RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
     )
 
-# アップローダー初期化用の動的キーバージョン管理
 if "uploader_key_ver" not in st.session_state:
     st.session_state["uploader_key_ver"] = 0
 
@@ -1450,7 +1567,6 @@ def analyze_data_with_gemini(
 # --------------------------------------------------
 
 def parse_json_selected_5r(result_text):
-    """勝負5R厳選結果のJSONをパースする"""
     try:
         clean_text = result_text.strip()
         if "```json" in clean_text:
@@ -1464,7 +1580,6 @@ def parse_json_selected_5r(result_text):
 
 
 def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_name):
-    """全12Rの下書きデータからメインRマスト＋勝負度上位4Rを選出し、詳細解析を実行する"""
     client = genai.Client(api_key=api_key)
 
     all_races_payload_text = ""
@@ -1552,7 +1667,6 @@ def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_nam
 
 
 def render_field_mode_ui(api_key, active_selected_rule, selected_model):
-    """現地観戦モードのメインUI描画"""
     st.subheader("🏇 現地観戦用モード：全12Rから勝負5Rを厳選分析")
     st.caption("当日の全12レース（＋裏重賞）を蓄積し、メインレース必須＋勝負期待値の高い4Rを一括抽出します。")
 
@@ -1631,7 +1745,7 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                         df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
                         
                         save_to_db(df_r)
-                        render_race_evaluation_view(df_r, is_viewer_mode=False)
+                        render_race_evaluation_view(df_r, is_viewer_mode=False, show_chat=True)
 
 
 # --------------------------------------------------
@@ -1651,7 +1765,9 @@ if "draft_toast_msg" in st.session_state:
         st.toast(msg_text, icon="❌")
 
 st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
-st.title("ウマエル解析サイト v2.8")
+
+# ★ タイトル表記を「ウマエルプロ Ver 2.9」に更新
+st.title("ウマエルプロ Ver 2.9")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
 )
@@ -1666,6 +1782,8 @@ with st.sidebar:
             "🏇 現地観戦用（勝負5R厳選）",
             "⚙️ ルール管理・アップデート",
             "🔄 回顧・精度検証",
+            "📊 評価データ一覧（プール）",
+            "📝 回顧・精度検証一覧（プール）",
             "🗄 過去馬データベース（プール）",
         ],
         index=0,
@@ -1691,7 +1809,7 @@ with st.sidebar:
             index=0,
             help="現行推奨モデル: gemini-3.8-flash",
         )
-        st.caption("🔑 APIキー自動保存機能オン")
+        st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
 
 if selected_menu == "📋 レース分析・予想":
@@ -1783,7 +1901,6 @@ if selected_menu == "📋 レース分析・予想":
     st.divider()
     st.subheader("📂 データのアップロード (.txt / .pdf / .png / .jpg / URL)")
 
-    # 動的キーバージョンの取得
     uploader_ver = st.session_state["uploader_key_ver"]
 
     col1, col2, col3 = st.columns(3)
@@ -1852,7 +1969,6 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group3,
                                 urls_group4_input,
                             )
-                            # 下書き保存成功時：アップローダーの動的キーをインクリメントして初期化（クリア）
                             st.session_state["uploader_key_ver"] += 1
                             st.session_state["selected_draft_race"] = actual_draft_name
                             st.session_state["draft_toast_msg"] = (
@@ -1869,8 +1985,9 @@ if selected_menu == "📋 レース分析・予想":
             if st.button(
                 "🔥 蓄積された全データでAI一括解析を実行", use_container_width=True
             ):
-                if not api_key:
-                    st.error("⚠️ サイドバーで Gemini API Key を設定してください！")
+                active_key = load_api_key()
+                if not active_key:
+                    st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！")
                 else:
                     pdf_opt_val = (
                         "1ページ目のみ"
@@ -1931,7 +2048,7 @@ if selected_menu == "📋 レース分析・予想":
                         ):
                             try:
                                 result_text = analyze_data_with_gemini(
-                                    api_key,
+                                    active_key,
                                     active_selected_rule,
                                     comb_t1,
                                     comb_p1,
@@ -1993,8 +2110,9 @@ if selected_menu == "📋 レース分析・予想":
 
     else:
         if st.button("🔥 AI分析を実行する", use_container_width=True):
-            if not api_key:
-                st.error("⚠️ サイドバーで Gemini API Key を入力してください！")
+            active_key = load_api_key()
+            if not active_key:
+                st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！")
             elif (
                 not files_group1
                 and not files_group2
@@ -2028,7 +2146,7 @@ if selected_menu == "📋 レース分析・予想":
                         t4 = process_multiple_urls(urls_group4_input)
 
                         result_text = analyze_data_with_gemini(
-                            api_key,
+                            active_key,
                             active_selected_rule,
                             t1,
                             p1,
@@ -2083,13 +2201,8 @@ if selected_menu == "📋 レース分析・予想":
         ):
             st.success(st.session_state["analysis_success_msg"])
 
-            curr_race_name = st.session_state["analyzed_df"]["レース名"].iloc[0]
-            encoded_race = urllib.parse.quote(str(curr_race_name))
-            st.info("🔗 **知人への共有・ポータル閲覧用URL（コピーしてお使いください）:**")
-            st.code(f"https://umael-analyzer.streamlit.app/?race={encoded_race}", language="text")
-
         render_race_evaluation_view(
-            st.session_state["analyzed_df"], is_viewer_mode=False
+            st.session_state["analyzed_df"], is_viewer_mode=False, show_chat=True
         )
 
 elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
@@ -2114,7 +2227,8 @@ elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
             RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
         )
 
-    render_field_mode_ui(api_key, active_selected_rule, selected_model)
+    active_key = load_api_key()
+    render_field_mode_ui(active_key, active_selected_rule, selected_model)
 
 elif selected_menu == "⚙️ ルール管理・アップデート":
     st.subheader("⚙️ 解析ルールの管理・アップデート")
@@ -2286,7 +2400,6 @@ elif selected_menu == "🔄 回顧・精度検証":
                 "1. 結果テキストのコピペ（netkeiba/JRA結果画面等）", height=180
             )
         with col_r2:
-            # 複数ファイルの選択・アップロードに対応（accept_multiple_files=True）
             res_file_inputs = st.file_uploader(
                 "2. 複数ソース結果ファイル (.txt / .pdf / .png / .jpg 一括選択可)",
                 type=["txt", "pdf", "png", "jpg", "jpeg"],
@@ -2297,11 +2410,11 @@ elif selected_menu == "🔄 回顧・精度検証":
         if st.button(
             "🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True
         ):
-            if not api_key:
+            active_key = load_api_key()
+            if not active_key:
                 st.error(
                     "⚠️"
-                    " サイドバーの「⚙️"
-                    " システム設定」を展開し、Gemini API Keyを入力してください！"
+                    " Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！"
                 )
             elif not res_text_input and not res_file_inputs:
                 st.warning("⚠️ 結果テキストのコピペまたはファイルを1つ以上読み込ませてください！")
@@ -2313,7 +2426,6 @@ elif selected_menu == "🔄 回顧・精度検証":
                     try:
                         raw_result = res_text_input if res_text_input else ""
                         
-                        # アップロードされた複数ファイルの一括読み込み・テキスト統合処理
                         if res_file_inputs:
                             for res_file in res_file_inputs:
                                 res_file.seek(0)
@@ -2395,10 +2507,9 @@ elif selected_menu == "🔄 回顧・精度検証":
                             "（※ヘッダータイトルのバージョンをver.8.Xから更新後の新バージョンに変更し、本文内の更新日時も最新にし、補正・改修部分を正しい該当項目内に差し込み・完全統合した状態の『最新ルール全文』を出力してください。末尾への単純追記ではなく、ルール文章全体に適切に挿入・結合された完成版全文にすること）\n"
                         )
 
-                        client = genai.Client(api_key=api_key)
+                        client = genai.Client(api_key=active_key)
                         contents_list = [prompt]
                         
-                        # 複数ファイル（画像・PDF）をGeminiマルチメディアパーツとして追加
                         if res_file_inputs:
                             for res_file in res_file_inputs:
                                 if res_file.name.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
@@ -2541,6 +2652,122 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                     except Exception as e:
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
+
+elif selected_menu == "📊 評価データ一覧（プール）":
+    st.subheader("📊 評価データ一覧（プール閲覧専用画面）")
+    st.caption("過去に解析・保存された予想レースデータを単独枠でいつでも閲覧できます。")
+
+    db_df = load_db()
+
+    if db_df.empty:
+        st.info("💡 現在データベースに保存されている予想データはありません。「📋 レース分析・予想」メニューから解析を実行してください！")
+    else:
+        all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+
+        selected_eval_race = st.selectbox(
+            "🎯 閲覧する予想データ（レース）を選択してください：",
+            all_races,
+            key="eval_pool_race_select"
+        )
+
+        if selected_eval_race:
+            matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
+            if not matched_df.empty:
+                render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+            else:
+                st.error(f"⚠️ 選択されたレース「{selected_eval_race}」のデータが見つかりませんでした。")
+
+elif selected_menu == "📝 回顧・精度検証一覧（プール）":
+    st.subheader("📝 回顧・精度検証データ一覧（プール閲覧専用画面）")
+    st.caption("取り込み・検証されたレース結果およびプロの回顧コメントレポートを閲覧できます。")
+
+    db_df = load_db()
+
+    if db_df.empty:
+        st.info("💡 データベースに予想・回顧データが見つかりません。")
+    else:
+        if "回顧メモ" in db_df.columns or "確定着順" in db_df.columns:
+            recap_mask = (
+                (db_df.get("回顧メモ", pd.Series([""]*len(db_df))).astype(str).str.strip() != "") |
+                (db_df.get("確定着順", pd.Series([""]*len(db_df))).astype(str).str.strip() != "")
+            )
+            recap_races = db_df[recap_mask]["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+            all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+        else:
+            recap_races = []
+            all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+
+        if not recap_races:
+            st.warning("⚠️ 回顧・着順データが保存されているレースがまだありません。")
+            st.info("💡 サイドバーの「🔄 回顧・精度検証」メニューからレース結果を取り込むと、ここに自動プールされます！")
+            target_race_options = all_races
+        else:
+            st.success(f"📦 回顧・検証済みレース: 全 {len(recap_races)} 件")
+            target_race_options = recap_races + [r for r in all_races if r not in recap_races]
+
+        selected_recap_race = st.selectbox(
+            "🏁 閲覧する回顧データ（レース）を選択してください：",
+            target_race_options,
+            key="recap_pool_race_select"
+        )
+
+        if selected_recap_race:
+            race_df = db_df[db_df["レース名"].astype(str) == str(selected_recap_race)].copy()
+
+            recap_text = ""
+            if "回顧メモ" in race_df.columns:
+                recap_memos = race_df["回顧メモ"].dropna().unique()
+                non_empty = [m for m in recap_memos if str(m).strip()]
+                if non_empty:
+                    recap_text = str(non_empty[0]).strip()
+
+            target_cols = [
+                c for c in [
+                    "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                    "単勝人気", "確定オッズ", "タイム", "上り3F", "勝因・敗因ショートメモ"
+                ] if c in race_df.columns
+            ]
+            disp_result_df = race_df[target_cols].copy()
+
+            def highlight_ranks_view(row):
+                rank_val = normalize_rank(row.get("確定着順", ""))
+                if rank_val == "1":
+                    return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
+                elif rank_val == "2":
+                    return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
+                elif rank_val == "3":
+                    return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
+                return [""] * len(row)
+
+            st.markdown(f"### 🏆 【{selected_recap_race}】 全頭確定着順 ＆ 照合結果")
+
+            calc_height = min(500, (len(disp_result_df) + 1) * 35 + 38)
+            st.dataframe(
+                disp_result_df.style.apply(highlight_ranks_view, axis=1),
+                column_config={
+                    "総合スコア": st.column_config.ProgressColumn(
+                        "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
+                    ),
+                },
+                use_container_width=True,
+                height=calc_height,
+                hide_index=True,
+            )
+
+            st.divider()
+
+            st.markdown("### 📝 詳細レース回顧・プロの見解レポート")
+            if recap_text:
+                st.markdown(
+                    f"""
+                    <div class="recap-box">
+{recap_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("ℹ️ このレースにはまだプロ回顧コメントレポートが入力されていません。")
 
 elif selected_menu == "🗄 過去馬データベース（プール）":
     st.subheader("🗄️ 過去馬データベース（プール一覧・レース別閲覧）")
