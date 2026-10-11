@@ -704,7 +704,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
         st.warning("⚠️ 表示できる解析データがありません。再度分析を実行してください。")
         return
 
-    # ★ 空行・無効行の完全自動除外（馬名が空の行や完全NaN行を除去）
+    # 空行・無効行の完全自動除外（馬名が空の行や完全NaN行を除去）
     df = df[df["馬名"].astype(str).str.strip() != ""].dropna(how="all").reset_index(drop=True)
     if df.empty:
         st.warning("⚠️ 有効な出走馬データが見つかりませんでした。")
@@ -967,7 +967,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             top_group = disp_df.head(5)
             sub_group = disp_df.iloc[5:] if len(disp_df) > 5 else pd.DataFrame()
 
-            # サマリーグループテーブルも頭数に応じて動的フィット高さ調整
+            # サマリーグループテーブルの高さ動的調整
             top_height = min(300, (len(top_group) + 1) * 35 + 38)
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
             st.dataframe(
@@ -1051,7 +1051,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             ),
         }
 
-        # ★ 出走頭数に応じたテーブル高さの動的自動フィット計算（1行約35px + ヘッダー38px、上限600px）
+        # 出走頭数に応じたテーブル高さの動的自動フィット計算（1行約35px + ヘッダー38px、上限600px）
         calc_table_height = min(600, (len(view_df) + 1) * 35 + 38)
 
         st.dataframe(
@@ -2282,9 +2282,12 @@ elif selected_menu == "🔄 回顧・精度検証":
                 "1. 結果テキストのコピペ（netkeiba/JRA結果画面等）", height=180
             )
         with col_r2:
-            res_file_input = st.file_uploader(
-                "2. 結果ファイル (.txt / .pdf / .png / .jpg)",
+            # 複数ファイルの選択・アップロードに対応（accept_multiple_files=True）
+            res_file_inputs = st.file_uploader(
+                "2. 複数ソース結果ファイル (.txt / .pdf / .png / .jpg 一括選択可)",
                 type=["txt", "pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="recap_multi_file_uploader",
             )
 
         if st.button(
@@ -2296,24 +2299,26 @@ elif selected_menu == "🔄 回顧・精度検証":
                     " サイドバーの「⚙️"
                     " システム設定」を展開し、Gemini API Keyを入力してください！"
                 )
-            elif not res_text_input and not res_file_input:
-                st.warning("⚠️ 結果テキストのコピペまたはファイルを読み込ませてください！")
+            elif not res_text_input and not res_file_inputs:
+                st.warning("⚠️ 結果テキストのコピペまたはファイルを1つ以上読み込ませてください！")
             else:
                 with st.spinner(
                     "🏇"
-                    " AIが全着順を照合・深掘り長文回顧し、評価ルールの見直し要否を検証中..."
+                    " AIが全結果データを統合し、全着順を照合・深掘り長文回顧＆ルール検証中..."
                 ):
                     try:
                         raw_result = res_text_input if res_text_input else ""
-                        if res_file_input:
-                            if res_file_input.name.lower().endswith(".pdf"):
-                                raw_result += "\n" + extract_text_from_pdf(
-                                    res_file_input, page_option="全ページ"
-                                )
-                            elif res_file_input.name.lower().endswith(".txt"):
-                                raw_result += "\n" + res_file_input.read().decode(
-                                    "utf-8", errors="ignore"
-                                )
+                        
+                        # アップロードされた複数ファイルの一括読み込み・テキスト統合処理
+                        if res_file_inputs:
+                            for res_file in res_file_inputs:
+                                res_file.seek(0)
+                                if res_file.name.lower().endswith(".pdf"):
+                                    pdf_txt = extract_text_from_pdf(res_file, page_option="全ページ")
+                                    raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + pdf_txt
+                                elif res_file.name.lower().endswith(".txt"):
+                                    txt_data = res_file.read().decode("utf-8", errors="ignore")
+                                    raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + txt_data
 
                         target_df = db_df[
                             db_df["レース名"].astype(str) == str(selected_race)
@@ -2353,10 +2358,10 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                         prompt = (
                             "あなたは競馬予想プロフェッショナル「AI」です。\n"
-                            "以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ」を突き合わせ、全着順テーブル、プロ視点による詳細で長文の【本格レース回顧・見解レポート】、および【ルール改修案の自動判定】を行ってください。\n\n"
+                            "以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ（複数ソース統合版）」を突き合わせ、全着順テーブル、プロ視点による詳細で長文の【本格レース回顧・見解レポート】、および【ルール改修案の自動判定】を行ってください。\n\n"
                             f"【予想データ】\n{predict_summary}\n\n"
                             f"【現在適用中の評価ルール】\n{current_rule}\n\n"
-                            f"【実際のレース結果データ】\n{raw_result}\n\n"
+                            f"【実際のレース結果データ（複数ソース統合版）】\n{raw_result}\n\n"
                             "【出力フォーマット要求】\n"
                             "1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
                             "確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ\n\n"
@@ -2388,15 +2393,26 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                         client = genai.Client(api_key=api_key)
                         contents_list = [prompt]
-                        if res_file_input and res_file_input.name.lower().endswith(
-                            (".png", ".jpg", ".jpeg", ".pdf")
-                        ):
-                            res_file_input.seek(0)
-                            contents_list.append(
-                                types.Part.from_bytes(
-                                    data=res_file_input.read(), mime_type=res_file_input.type
-                                )
-                            )
+                        
+                        # 複数ファイル（画像・PDF）をGeminiマルチメディアパーツとして追加
+                        if res_file_inputs:
+                            for res_file in res_file_inputs:
+                                if res_file.name.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+                                    res_file.seek(0)
+                                    mime_t = res_file.type
+                                    if not mime_t or mime_t == "application/octet-stream":
+                                        if res_file.name.lower().endswith(".pdf"):
+                                            mime_t = "application/pdf"
+                                        elif res_file.name.lower().endswith(".png"):
+                                            mime_t = "image/png"
+                                        elif res_file.name.lower().endswith((".jpg", ".jpeg")):
+                                            mime_t = "image/jpeg"
+                                    if mime_t:
+                                        contents_list.append(
+                                            types.Part.from_bytes(
+                                                data=res_file.read(), mime_type=mime_t
+                                            )
+                                        )
 
                         response = client.models.generate_content(
                             model=selected_model,
@@ -2474,7 +2490,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                             return [""] * len(row)
 
                         st.success(
-                            f"🎉 レース「{selected_race}」の全着順照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
+                            f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                         )
 
                         calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
