@@ -962,7 +962,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
                 "馬名": st.column_config.TextColumn("馬名", width="medium"),
                 "予想人気": st.column_config.TextColumn("予想人気", width="small"),
                 "総合スコア": st.column_config.ProgressColumn(
-                    "指数合計値", format="%d点", min_value=0, max_value=100
+                    "指数合計値", format="%d点", min_value=0, max_value=100, color="#0bce0e"
                 ),
             }
 
@@ -1035,7 +1035,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False):
             "馬名": st.column_config.TextColumn("馬名", width="medium"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium"
+                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium", color="#0bce0e"
             ),
             "評価": st.column_config.TextColumn("評価", width="small"),
             "出馬表点": st.column_config.NumberColumn("出馬表点", width="small"),
@@ -2616,7 +2616,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "単勝人気": st.column_config.TextColumn("単勝人気", width="small"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100
+                "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
             ),
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
