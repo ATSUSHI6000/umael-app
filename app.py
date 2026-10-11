@@ -251,13 +251,9 @@ def normalize_race_name_for_comparison(name):
     """比較用に全角/半角を統一し、スペース・記号・アルファベット小文字化して標準キーを作成"""
     if not name:
         return ""
-    # NFKC正規化（全角英数字・記号・カナ等の統一）
     s = unicodedata.normalize('NFKC', str(name))
-    # 小文字化
     s = s.lower()
-    # 空白（全角半角スペース・タブ）の除去
     s = re.sub(r'\s+', '', s)
-    # 記号・アンダースコア・ハイフン・括弧類の除去
     s = re.sub(r'[_\-\–\—\(\)（）\[\]【】]', '', s)
     return s
 
@@ -275,17 +271,13 @@ def find_matching_existing_draft(target_race_name):
 
 
 def clean_race_name_from_filename(filename):
-    """ファイル名から「競馬新聞」「競馬新」「馬柱」「出馬表」、日付・西暦（_2026など）、連番（_2など）の余分なノイズを除去して純粋な正式レース名のみを抽出"""
+    """ファイル名からノイズキーワードを除去して純粋な正式レース名のみを抽出"""
     if not filename:
         return ""
     
-    # 拡張子の除去
     base_name = os.path.splitext(filename)[0]
-    
-    # 1. NFKC正規化（全角/半角の統一、濁点・半濁点・結合文字の正常化で途切れ防止）
     cleaned = unicodedata.normalize('NFKC', base_name)
     
-    # 2. 不要なキーワード群の除去（単語として正確に置換）
     noise_patterns = [
         r"競馬新聞", r"競馬新", r"新聞", r"出馬表", r"馬柱", r"確定データ", r"確定",
         r"過去データ", r"過去", r"傾向", r"回顧", r"データ", r"全ページ", r"印刷"
@@ -293,14 +285,10 @@ def clean_race_name_from_filename(filename):
     for pat in noise_patterns:
         cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
     
-    # 3. 日付（YYYYMMDD / YYYY）や西暦（例: _20261011, _2026, 2026 など）の除去
     cleaned = re.sub(r'[_\s\-\—]?(?:20\d{2})(?:[01]\d[0-3]\d)?', '', cleaned)
-    
-    # 4. 末尾の連番・枝番（_2, _1, -2, (1) など）の除去
     cleaned = re.sub(r'[_\s\-\—]\d+$', '', cleaned)
     cleaned = re.sub(r'\(\d+\)$', '', cleaned)
     
-    # 5. 不可文字の置換と連続する記号・アンダースコア・空白の整形
     cleaned = re.sub(r'[\\/*?:"<>|]', "_", cleaned)
     cleaned = re.sub(r'[_\s\-\—]+', '_', cleaned)
     cleaned = cleaned.strip('_').strip()
@@ -326,7 +314,6 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text):
     else:
         race_name = clean_race_name_from_filename(race_name)
 
-    # 表記揺れを吸収して既存の同一レース下書きフォルダが存在するか照合
     matched_existing_race = find_matching_existing_draft(race_name)
     if matched_existing_race:
         sanitized_name = matched_existing_race
@@ -1183,6 +1170,10 @@ if "hok_text_val" not in st.session_state:
         RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
     )
 
+# アップローダー初期化用の動的キーバージョン管理
+if "uploader_key_ver" not in st.session_state:
+    st.session_state["uploader_key_ver"] = 0
+
 
 def save_to_db(new_df):
     if new_df.empty:
@@ -1760,6 +1751,9 @@ if selected_menu == "📋 レース分析・予想":
     st.divider()
     st.subheader("📂 データのアップロード (.txt / .pdf / .png / .jpg / URL)")
 
+    # 動的キーバージョンの取得
+    uploader_ver = st.session_state["uploader_key_ver"]
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -1767,7 +1761,7 @@ if selected_menu == "📋 レース分析・予想":
             "1. 出馬表・枠順・近5走・血統 (.txt / .pdf / .png / .jpg)",
             type=["txt", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
-            key="fg1",
+            key=f"fg1_{uploader_ver}",
         )
 
     with col2:
@@ -1775,7 +1769,7 @@ if selected_menu == "📋 レース分析・予想":
             "2. 競馬ブック・調教データ (.pdf / .png / .jpg)",
             type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
-            key="fg2",
+            key=f"fg2_{uploader_ver}",
         )
         pdf_page_opt = st.radio(
             "📄 競馬ブックPDFの読み込み範囲",
@@ -1789,7 +1783,7 @@ if selected_menu == "📋 レース分析・予想":
             "3. 当日・前日の傾向・馬場情報 (.txt / .pdf / .png / .jpg)",
             type=["txt", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
-            key="fg3",
+            key=f"fg3_{uploader_ver}",
         )
 
     st.write("")
@@ -1797,7 +1791,7 @@ if selected_menu == "📋 レース分析・予想":
         "🔗 4. プロ予想・YouTube・Web参考URL（改行して複数貼り付けOK）",
         height=90,
         placeholder="https://www.youtube.com/watch?v=...\nhttps://note.com/...",
-        key="ug4",
+        key=f"ug4_{uploader_ver}",
     )
 
     st.divider()
@@ -1826,6 +1820,8 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group3,
                                 urls_group4_input,
                             )
+                            # ★ 下書き保存成功時：アップローダーの動的キーをインクリメントして初期化（クリア）
+                            st.session_state["uploader_key_ver"] += 1
                             st.session_state["selected_draft_race"] = actual_draft_name
                             st.session_state["draft_toast_msg"] = (
                                 "success",
