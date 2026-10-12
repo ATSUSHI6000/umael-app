@@ -788,7 +788,7 @@ def render_umael_chat_ui(df, race_title):
 
                     client = genai.Client(api_key=gemini_key)
                     response = client.models.generate_content(
-                        model="gemini-1.5-flash",
+                        model="gemini-3.8-flash",
                         contents=contents_payload,
                         config=types.GenerateContentConfig(
                             temperature=0.3,
@@ -808,7 +808,7 @@ def render_umael_chat_ui(df, race_title):
 # 🔄 追加データ再評価・見解/買い目修正・現状維持判定機能
 # --------------------------------------------------
 
-def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text, add_media_parts, model_name):
+def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text, add_media_parts, model_name="gemini-3.8-flash"):
     """既存の評価データ（元スコア・印・見解・買い目）＋追加マルチモーダル情報を結合し、総合的な修正・現状維持を判定"""
     client = genai.Client(api_key=api_key)
 
@@ -904,7 +904,7 @@ def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text
     return response.text
 
 
-def render_re_evaluation_section(current_df, active_rules, selected_model):
+def render_re_evaluation_section(current_df, active_rules, selected_model="gemini-3.8-flash"):
     """評価画面内に直前追加データによる再評価・微調整UIを描画"""
     race_name_val = current_df['レース名'].iloc[0] if "レース名" in current_df.columns else "対象レース"
     
@@ -980,7 +980,6 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
 
                                 st.markdown("#### 📊 修正後の馬別スコア比較一覧")
                                 
-                                # 変更前後の比較表示を作成
                                 compare_df = updated_df[["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ"]].copy()
                                 old_scores = {}
                                 for _, o_row in current_df.iterrows():
@@ -1162,7 +1161,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
     # 直前追加データによる再評価・見解/買い目修正UIの描画
     active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-    render_re_evaluation_section(df, active_selected_rule, "gemini-1.5-flash")
+    render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
@@ -1648,7 +1647,7 @@ def analyze_data_with_gemini(
     text_group3,
     parts_group3,
     text_group4,
-    model_name,
+    model_name="gemini-3.8-flash",
 ):
     client = genai.Client(api_key=api_key)
 
@@ -1795,7 +1794,7 @@ def parse_json_selected_5r(result_text):
         return None
 
 
-def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_name):
+def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_name="gemini-3.8-flash"):
     client = genai.Client(api_key=api_key)
 
     all_races_payload_text = ""
@@ -1882,7 +1881,7 @@ def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_nam
     return response.text
 
 
-def render_field_mode_ui(api_key, active_selected_rule, selected_model):
+def render_field_mode_ui(api_key, active_selected_rule, selected_model="gemini-3.8-flash"):
     st.subheader("🏇 現地観戦用モード：全12Rから勝負5Rを厳選分析")
     st.caption("当日の全12レース（＋裏重賞）を蓄積し、メインレース必須＋勝負期待値の高い4Rを一括抽出します。")
 
@@ -2020,9 +2019,9 @@ with st.sidebar:
 
         selected_model = st.selectbox(
             "🤖 使用AIモデル",
-            ["gemini-1.5-flash"],
+            ["gemini-3.8-flash"],
             index=0,
-            help="現行推奨モデル: gemini-1.5-flash",
+            help="推奨モデル: gemini-3.8-flash",
         )
         st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
