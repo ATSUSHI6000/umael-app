@@ -15,7 +15,7 @@ import pdfplumber
 import pypdf
 import streamlit as st
 
-# ページ基本設定（Ver 2.9 に更新）
+# ページ基本設定（Ver 2.9）
 st.set_page_config(
     page_title="ウマエルプロ Ver 2.9", page_icon="🏇", layout="wide"
 )
@@ -49,14 +49,12 @@ def list_draft_races():
 
 
 def load_api_key():
-    # 1. st.secrets から優先取得
     try:
         if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"].strip():
             return st.secrets["GEMINI_API_KEY"].strip()
     except Exception:
         pass
 
-    # 2. 保存ファイルから取得
     if os.path.exists(API_KEY_FILE):
         try:
             with open(API_KEY_FILE, "r", encoding="utf-8") as f:
@@ -203,7 +201,7 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
             f.seek(0)
             file_bytes = f.read()
 
-            if fname.lower().endswith(".txt"):
+            if fname.lower().endswith((".txt", ".csv")):
                 content = file_bytes.decode("utf-8", errors="ignore")
                 if any(
                     k in fname
@@ -215,7 +213,7 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
                     )
                 else:
                     prompt_text += (
-                        f"\n=========================================\n【確定メイン出馬データファイル:"
+                        f"\n=========================================\n【確定メイン出馬・追加データファイル:"
                         f" {fname}】\n=========================================\n"
                         + content
                     )
@@ -233,7 +231,7 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
                         )
                     else:
                         prompt_text += (
-                            f"\n=========================================\n【確定メイン出馬データ（PDF抽出）:"
+                            f"\n=========================================\n【確定メイン出馬・追加データ（PDF抽出）:"
                             f" {fname}】\n=========================================\n"
                             + extracted
                         )
@@ -401,7 +399,7 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
                 for k in ["過去", "傾向", "データ", "歴史", "前日", "回顧"]
             )
 
-            if original_fname.lower().endswith(".txt"):
+            if original_fname.lower().endswith((".txt", ".csv")):
                 decoded = file_bytes.decode("utf-8", errors="ignore")
                 if is_past_ref:
                     txt_content += (
@@ -707,30 +705,33 @@ def parse_json_ai_output(result_text):
 
 
 # --------------------------------------------------
-# 💬 Gemini API 連携 ウマエルAIチャットUI
+# 💬 Gemini API 連携 ウマエルAIチャットUI（画像・ファイル添付対応）
 # --------------------------------------------------
 
 def render_umael_chat_ui(df, race_title):
     st.divider()
-    st.subheader(f"💬 ウマエルAIチャット（【{race_title}】分析・質問）")
-    st.caption("このレースの印・各評価点・血統・展開データをもとに、ウマエルAIが多角的な根拠でお答えします！")
+    st.subheader(f"💬 ウマエルAIチャット（【{race_title}】マルチ分析・質問）")
+    st.caption("パドック写真・馬体重スクショ・直前メモなどを添付して、ウマエルAIに多角的な質問が可能です！")
 
-    # レースごとのチャット履歴を session_state に保持
     sanitized_title = re.sub(r'\W+', '_', race_title)
     chat_key = f"chat_history_{sanitized_title}"
     if chat_key not in st.session_state:
         st.session_state[chat_key] = []
 
-    # APIキーの取得（st.secrets 優先）
     gemini_key = load_api_key()
 
-    # これまでの会話履歴の表示
+    chat_uploaded_files = st.file_uploader(
+        "📎 チャット用画像・パドック写真・追加資料（任意添付）",
+        type=["png", "jpg", "jpeg", "pdf", "txt", "csv"],
+        accept_multiple_files=True,
+        key=f"chat_files_{sanitized_title}",
+    )
+
     for msg in st.session_state[chat_key]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # ユーザー入力メッセージ受け取り
-    user_input = st.chat_input(f"「{race_title}」についてウマエルAIに質問する...")
+    user_input = st.chat_input(f"「{race_title}」について画像添付や質問をする...")
 
     if user_input:
         st.session_state[chat_key].append({"role": "user", "content": user_input})
@@ -739,18 +740,17 @@ def render_umael_chat_ui(df, race_title):
 
         if not gemini_key:
             with st.chat_message("assistant"):
-                st.error("⚠️ Gemini API Key が読み込めません。`st.secrets[\"GEMINI_API_KEY\"]` またはサイドバーのシステム設定で API Key を設定してください！")
+                st.error("⚠️ Gemini API Key が読み込めません。`st.secrets[\"GEMINI_API_KEY\"]` またはシステム設定で API Key を設定してください！")
             return
 
         with st.chat_message("assistant"):
-            with st.spinner("🏇 ウマエルAIがレースデータを全頭チェックして回答中..."):
+            with st.spinner("🏇 ウマエルAIが添付データとレース評価を全頭チェックして回答中..."):
                 try:
-                    # 背景コンテキスト作成
                     cols_to_include = [c for c in ["馬番", "馬名", "総合スコア", "評価", "予想人気", "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り", "メモ"] if c in df.columns]
                     race_context_str = df[cols_to_include].to_string(index=False)
 
                     system_instruction = f"""あなたは頼れる競馬AIプロフェッショナル「ウマエル」です。
-ユーザー（アニキ）からの質問に対し、以下の対象レースの全頭評価データ（総合スコア、評価、各種評価点、印、詳細分析メモ等）を客観的・多角的な根拠として分析し、親しみやすく頼もしい口調で的確に回答してください。
+ユーザー（アニキ）からの質問・添付資料に対し、以下の対象レースの全頭評価データを客観的・多角的な根拠として分析し、親しみやすく頼もしい口調で的確に回答してください。
 
 【対象レース名】: {race_title}
 【対象レース全頭評価データ】:
@@ -758,22 +758,38 @@ def render_umael_chat_ui(df, race_title):
 
 【回答ルール・ペルソナ】:
 - 「アニキ」と呼びかけ、頼もしく誠実・丁寧に回答してください。
-- 総合スコア、血統点、調教点、展開点、近5走点、馬場点などの具体的数値や評価メモを根拠として挙げてください。
-- ポイントを分かりやすくまとめて説明してください。
+- 総合スコア、各種評価点、パドック写真・添付資料の気配などの具体的要素を根拠として挙げてください。
 """
 
-                    # 過去の会話履歴の整形
                     history_text = ""
                     for m in st.session_state[chat_key][:-1]:
                         role_name = "アニキ (ユーザー)" if m["role"] == "user" else "ウマエル (AI)"
                         history_text += f"{role_name}: {m['content']}\n"
 
-                    full_prompt = f"{system_instruction}\n\n【これまでの会話履歴】:\n{history_text}\n\nアニキの最新の質問: {user_input}"
+                    full_prompt_text = f"{system_instruction}\n\n【これまでの会話履歴】:\n{history_text}\n\nアニキの最新の質問: {user_input}"
+
+                    contents_payload = [full_prompt_text]
+
+                    if chat_uploaded_files:
+                        for cfile in chat_uploaded_files:
+                            cfile.seek(0)
+                            cbytes = cfile.read()
+                            fname_l = cfile.name.lower()
+                            if fname_l.endswith((".txt", ".csv")):
+                                contents_payload.append(f"\n【添付テキスト ({cfile.name})】:\n" + cbytes.decode("utf-8", errors="ignore"))
+                            elif fname_l.endswith(".pdf"):
+                                bio = io.BytesIO(cbytes)
+                                pdf_txt = extract_text_from_pdf(bio, page_option="全ページ")
+                                contents_payload.append(f"\n【添付PDF ({cfile.name})】:\n" + pdf_txt)
+                                contents_payload.append(types.Part.from_bytes(data=cbytes, mime_type="application/pdf"))
+                            elif fname_l.endswith((".png", ".jpg", ".jpeg")):
+                                m_type = "image/png" if fname_l.endswith(".png") else "image/jpeg"
+                                contents_payload.append(types.Part.from_bytes(data=cbytes, mime_type=m_type))
 
                     client = genai.Client(api_key=gemini_key)
                     response = client.models.generate_content(
-                        model="gemini-3.8-flash",
-                        contents=[full_prompt],
+                        model="gemini-1.5-flash",
+                        contents=contents_payload,
                         config=types.GenerateContentConfig(
                             temperature=0.3,
                             seed=42,
@@ -786,6 +802,207 @@ def render_umael_chat_ui(df, race_title):
 
                 except Exception as e:
                     st.error(f"❌ チャット処理中にエラーが発生しました: {e}")
+
+
+# --------------------------------------------------
+# 🔄 追加データ再評価・見解/買い目修正・現状維持判定機能
+# --------------------------------------------------
+
+def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text, add_media_parts, model_name):
+    """既存の評価データ（元スコア・印・見解・買い目）＋追加マルチモーダル情報を結合し、総合的な修正・現状維持を判定"""
+    client = genai.Client(api_key=api_key)
+
+    race_title = current_df["レース名"].iloc[0] if "レース名" in current_df.columns else "対象レース"
+    
+    current_tenkai = current_df["レース質展開予想"].iloc[0] if "レース質展開予想" in current_df.columns else ""
+    current_tickets = current_df["推奨買い目"].iloc[0] if "推奨買い目" in current_df.columns else ""
+    
+    cols_horses = [c for c in ["馬番", "馬名", "総合スコア", "評価", "予想人気", "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り", "メモ"] if c in current_df.columns]
+    current_horses_str = current_df[cols_horses].to_string(index=False)
+
+    reeval_prompt = f"""{active_rules}
+
+【★評価済みレースの直前追加データ再検証・見解/買い目修正＆微調整プロンプト】
+あなたは競馬プロ解析AI「ウマエル」です。
+事前に解析・算出済みの【現在のレース評価データ・展開見解・買い目】に対し、直前に届いた【追加情報（パドック気配、馬体重増減、直前馬場、ニュース、メモ、画像、CSV/PDF等）】を統合解析し、評価スコア・展開見解・推奨買い目の修正または現状維持を判定してください。
+
+【現在のレース全頭評価データ】:
+{current_horses_str}
+
+【現在の展開見解（レース質＆展開予想）】:
+{current_tenkai}
+
+【現在の推奨買い目】:
+{current_tickets}
+
+【直前に届いた追加データ（テキスト・メモ）】:
+{add_text}
+
+【判定・出力ルール（厳格厳守）】:
+1. 追加データを精査し、既存の「スコア・印」「レース展開見解」「推奨買い目」に変更を加えるべきか慎重に判断してください。
+2. **【評価・見解・買い目に変化がない場合】**:
+   - `has_changes` を `false` に設定してください。
+   - `change_summary` に「追加情報を解析しましたが、総合スコア・評価・見解・買い目に変更はありません（現状維持）」と明記してください。
+   - `race_quality_and_tenkai` および `recommended_tickets` には現在の内容をそのまま格納してください。
+   - `horses` には現在の評価データをそのまま格納してください。
+3. **【評価・見解・買い目に修正・変化がある場合】**:
+   - `has_changes` を `true` に設定してください。
+   - `change_summary` に「どの馬の評価・スコアをなぜ微調整したか（変更前後のスコア比較含む）、展開見解や買い目をどう変更したか」の詳細理由を明確に記述してください。
+   - `race_quality_and_tenkai` には修正後の最新レース展開見解を格納してください。
+   - `recommended_tickets` には修正後の最新推奨買い目リスト（丸囲み数字 ①, ②... を使用）を格納してください。
+   - `horses` には修正後の全出走馬データを格納してください。
+
+【出力形式】:
+以下のJSON形式のみを出力してください（説明文章不着）。
+
+{{
+  "has_changes": true または false,
+  "change_summary": "現状維持の理由 または 修正・微調整されたポイントの詳細解説（比較解説含む）",
+  "race_name": "{race_title}",
+  "confidence": "軸馬信頼度",
+  "risk_level": "波乱度判定",
+  "race_quality_and_tenkai": "修正後（または維持）のレース質＆展開予想シミュレーション文章",
+  "recommended_tickets": [
+    "修正後（または維持）の推奨買い目1",
+    "修正後（または維持）の推奨買い目2"
+  ],
+  "horses": [
+    {{
+      "horse_num": 1,
+      "horse_name": "馬名",
+      "pop": "予想人気",
+      "total_score": 85,
+      "eval": "評価ランク",
+      "score_shubahyou": 85,
+      "score_kettou": 85,
+      "score_choukyou": 85,
+      "score_kin5so": 85,
+      "score_tenkai": 85,
+      "score_baba": 85,
+      "jiku": "〇または空文字",
+      "himo": "〇または空文字",
+      "chu": "〇または空文字",
+      "kiri": "〇または空文字",
+      "memo": "詳細分析メモ（追加データ反映版）"
+    }}
+  ]
+}}
+"""
+
+    contents = [reeval_prompt]
+    contents.extend(add_media_parts)
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.0,
+            seed=42,
+        ),
+    )
+    return response.text
+
+
+def render_re_evaluation_section(current_df, active_rules, selected_model):
+    """評価画面内に直前追加データによる再評価・微調整UIを描画"""
+    race_name_val = current_df['レース名'].iloc[0] if "レース名" in current_df.columns else "対象レース"
+    
+    with st.expander("🔄 【直前追加データ】パドック・馬体重・直前情報による再評価・見解/買い目修正", expanded=False):
+        st.write("パドック気配、馬体重発表、直前馬場状態などの追加データ（ファイル・手入力テキスト）を投入して、スコア・印だけでなく**「展開見解」**や**「推奨買い目」**も含めて再検証・微調整できます。")
+
+        col_add1, col_add2 = st.columns([1.5, 1])
+
+        with col_add1:
+            add_files = st.file_uploader(
+                "📂 追加資料・スクショ・CSV・PDF・テキスト (.txt / .csv / .pdf / .png / .jpg 一括添付可)",
+                type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"reeval_files_{race_name_val}",
+            )
+        with col_add2:
+            add_memo = st.text_area(
+                "✏️ 直前メモ・馬体重・パドック手入力",
+                height=100,
+                placeholder="例：①番パドック気配絶好、馬体重+8kg太目感なし。馬場は内伸び顕著のため逃げ・内枠を上方修正。",
+                key=f"reeval_memo_{race_name_val}",
+            )
+
+        if st.button("🚀 直前追加データを含めて再評価・見解/買い目修正を実行", use_container_width=True):
+            active_key = load_api_key()
+            if not active_key:
+                st.error("⚠️ Gemini API Key を設定してください！")
+            elif not add_files and not add_memo.strip():
+                st.warning("⚠️ 追加するファイルまたはメモテキストを入力してください！")
+            else:
+                with st.spinner("🏇 直前追加データと既存評価を統合解析し、見解・買い目・スコアを再検証中..."):
+                    try:
+                        add_text_content, add_media_parts = prepare_file_parts(add_files, pdf_page_option="全ページ")
+                        combined_add_text = add_text_content + "\n" + add_memo.strip()
+
+                        raw_json = reevaluate_race_data_with_gemini(
+                            active_key, active_rules, current_df, combined_add_text, add_media_parts, selected_model
+                        )
+
+                        clean_json = raw_json.strip()
+                        if "```json" in clean_json:
+                            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+                        elif "```" in clean_json:
+                            clean_json = clean_json.split("```")[1].split("```")[0].strip()
+
+                        eval_result = json.loads(clean_json)
+                        has_changes = eval_result.get("has_changes", False)
+                        summary_msg = eval_result.get("change_summary", "")
+
+                        if not has_changes:
+                            st.info(f"ℹ️ {summary_msg}")
+                        else:
+                            st.success(f"✨ **【評価・見解・買い目に修正あり】**\n\n{summary_msg}")
+                            
+                            updated_df = parse_json_ai_output(raw_json)
+                            if not updated_df.empty:
+                                st.session_state["temp_updated_df"] = updated_df
+                                
+                                st.markdown("#### 📌 修正後の展開見解・買い目プレビュー")
+                                if "レース質展開予想" in updated_df.columns and str(updated_df["レース質展開予想"].iloc[0]).strip():
+                                    st.caption("🏁 **【修正後のレース質・展開予想】**")
+                                    st.info(updated_df["レース質展開予想"].iloc[0])
+                                
+                                if "推奨買い目" in updated_df.columns and str(updated_df["推奨買い目"].iloc[0]).strip():
+                                    st.caption("💡 **【修正後の推奨買い目】**")
+                                    raw_tkts = updated_df["推奨買い目"].iloc[0]
+                                    try:
+                                        tkts = json.loads(raw_tkts)
+                                        for tk in tkts:
+                                            st.write(f"・{tk}")
+                                    except Exception:
+                                        st.write(raw_tkts)
+
+                                st.markdown("#### 📊 修正後の馬別スコア比較一覧")
+                                
+                                # 変更前後の比較表示を作成
+                                compare_df = updated_df[["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ"]].copy()
+                                old_scores = {}
+                                for _, o_row in current_df.iterrows():
+                                    old_scores[str(o_row.get("馬番", ""))] = safe_int(o_row.get("総合スコア", 0))
+                                
+                                compare_df["変更前スコア"] = compare_df["馬番"].astype(str).map(lambda nb: old_scores.get(nb, "-"))
+                                compare_df = compare_df[["馬番", "馬名", "変更前スコア", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ"]]
+                                compare_df.rename(columns={"総合スコア": "修正後スコア"}, inplace=True)
+                                
+                                st.dataframe(
+                                    compare_df,
+                                    use_container_width=True
+                                )
+
+                                if st.button("💾 この修正後の評価データでデータベースを上書き保存する", type="primary"):
+                                    save_to_db(updated_df)
+                                    st.session_state["analyzed_df"] = updated_df
+                                    st.success("🎉 データベースの評価・見解・買い目データを最新の修正版で更新しました！")
+                                    st.rerun()
+
+                    except Exception as e:
+                        st.error(f"❌ 再評価処理中にエラーが発生しました: {e}")
 
 
 def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
@@ -936,13 +1153,16 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             f"【3連複 軸1頭流し】 {h_num} － {aite_str}",
         ]
 
-    # ★ 可変共有専用URLの生成・表示
     encoded_race = urllib.parse.quote(str(race_title))
     share_url = f"https://umael-analyzer.streamlit.app/?mode=share&race={encoded_race}"
 
     if not is_viewer_mode:
         st.info("🔗 **レース名入り評価結果 専用共有URL（コピーして共有できます）:**")
         st.code(share_url, language="text")
+
+    # 直前追加データによる再評価・見解/買い目修正UIの描画
+    active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+    render_re_evaluation_section(df, active_selected_rule, "gemini-1.5-flash")
 
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
@@ -1153,7 +1373,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             hide_index=True,
         )
 
-    # チャットUIの描画
     if show_chat:
         render_umael_chat_ui(df, race_title)
 
@@ -1178,7 +1397,6 @@ st.markdown(
     .main { background-color: #080a0f; }
     h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
 
-    /* ★ 総合スコア（ProgressColumn）のバーカラー設定（指定色: #0bce0e） */
     div[data-testid="stDataFrame"] div[role="progressbar"] {
         height: 14px !important;
         border-radius: 4px !important;
@@ -1242,13 +1460,11 @@ st.markdown(
 )
 
 
-# ★ クエリパラメータ（共有表示モード・個別参照）のチェック
 query_params = st.query_params
 mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
 if mode_param == "share" and race_param:
-    # サイドバーおよび不要ヘッダーの完全非表示化スタイルを適用
     st.markdown("""
     <style>
         [data-testid="stSidebar"] { display: none !important; }
@@ -1766,7 +1982,6 @@ if "draft_toast_msg" in st.session_state:
 
 st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
 
-# ★ タイトル表記を「ウマエルプロ Ver 2.9」に更新
 st.title("ウマエルプロ Ver 2.9")
 st.caption(
     "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
@@ -1805,9 +2020,9 @@ with st.sidebar:
 
         selected_model = st.selectbox(
             "🤖 使用AIモデル",
-            ["gemini-3.8-flash"],
+            ["gemini-1.5-flash"],
             index=0,
-            help="現行推奨モデル: gemini-3.8-flash",
+            help="現行推奨モデル: gemini-1.5-flash",
         )
         st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
@@ -1899,7 +2114,7 @@ if selected_menu == "📋 レース分析・予想":
                     st.caption("まだ保存されているファイルはありません。")
 
     st.divider()
-    st.subheader("📂 データのアップロード (.txt / .pdf / .png / .jpg / URL)")
+    st.subheader("📂 データのアップロード (.txt / .csv / .pdf / .png / .jpg / URL)")
 
     uploader_ver = st.session_state["uploader_key_ver"]
 
@@ -1907,8 +2122,8 @@ if selected_menu == "📋 レース分析・予想":
 
     with col1:
         files_group1 = st.file_uploader(
-            "1. 出馬表・枠順・近5走・血統 (.txt / .pdf / .png / .jpg)",
-            type=["txt", "pdf", "png", "jpg", "jpeg"],
+            "1. 出馬表・枠順・近5走・血統 (.txt / .csv / .pdf / .png / .jpg)",
+            type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg1_{uploader_ver}",
         )
@@ -1929,8 +2144,8 @@ if selected_menu == "📋 レース分析・予想":
 
     with col3:
         files_group3 = st.file_uploader(
-            "3. 当日・前日の傾向・馬場情報 (.txt / .pdf / .png / .jpg)",
-            type=["txt", "pdf", "png", "jpg", "jpeg"],
+            "3. 当日・前日の傾向・馬場情報 (.txt / .csv / .pdf / .png / .jpg)",
+            type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg3_{uploader_ver}",
         )
@@ -2401,8 +2616,8 @@ elif selected_menu == "🔄 回顧・精度検証":
             )
         with col_r2:
             res_file_inputs = st.file_uploader(
-                "2. 複数ソース結果ファイル (.txt / .pdf / .png / .jpg 一括選択可)",
-                type=["txt", "pdf", "png", "jpg", "jpeg"],
+                "2. 複数ソース結果ファイル (.txt / .csv / .pdf / .png / .jpg 一括選択可)",
+                type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key="recap_multi_file_uploader",
             )
@@ -2432,7 +2647,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 if res_file.name.lower().endswith(".pdf"):
                                     pdf_txt = extract_text_from_pdf(res_file, page_option="全ページ")
                                     raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + pdf_txt
-                                elif res_file.name.lower().endswith(".txt"):
+                                elif res_file.name.lower().endswith((".txt", ".csv")):
                                     txt_data = res_file.read().decode("utf-8", errors="ignore")
                                     raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + txt_data
 
@@ -2655,7 +2870,7 @@ elif selected_menu == "🔄 回顧・精度検証":
 
 elif selected_menu == "📊 評価データ一覧（プール）":
     st.subheader("📊 評価データ一覧（プール閲覧専用画面）")
-    st.caption("過去に解析・保存された予想レースデータを単独枠でいつでも閲覧できます。")
+    st.caption("過去に解析・保存された予想レースデータを単独枠でいつでも閲覧・再評価できます。")
 
     db_df = load_db()
 
@@ -2665,7 +2880,7 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
 
         selected_eval_race = st.selectbox(
-            "🎯 閲覧する予想データ（レース）を選択してください：",
+            "🎯 閲覧・再評価する予想データ（レース）を選択してください：",
             all_races,
             key="eval_pool_race_select"
         )
