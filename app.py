@@ -1152,16 +1152,18 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             f"【3連複 軸1頭流し】 {h_num} － {aite_str}",
         ]
 
+    # ★ 共有URL生成ドメインの厳密固定（404エラー対策）
     encoded_race = urllib.parse.quote(str(race_title))
-    share_url = f"https://umael-analyzer.streamlit.app/?mode=share&race={encoded_race}"
+    share_url = f"https://umael-pro.streamlit.app/?mode=share&race={encoded_race}"
 
     if not is_viewer_mode:
         st.info("🔗 **レース名入り評価結果 専用共有URL（コピーして共有できます）:**")
         st.code(share_url, language="text")
 
-    # 直前追加データによる再評価・見解/買い目修正UIの描画
-    active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-    render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
+    # 直前追加データによる再評価・見解/買い目修正UIの描画（共有モード以外で表示）
+    if not is_viewer_mode:
+        active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+        render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
@@ -1459,19 +1461,33 @@ st.markdown(
 )
 
 
+# ★ 共有モード（mode=share）アクセス時の完全シンプル表示制御 ＆ ルーティング
 query_params = st.query_params
 mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
 if mode_param == "share" and race_param:
+    # 1. サイドバー・ヘッダー・フッター・ナビゲーションの完全非表示制御
     st.markdown("""
     <style>
         [data-testid="stSidebar"] { display: none !important; }
         div[data-testid="stSidebarCollapseButton"] { display: none !important; }
-        .main .block-container { max-width: 100% !important; padding-top: 1rem !important; }
+        header[data-testid="stHeader"] { display: none !important; }
+        footer { display: none !important; }
+        .main .block-container,
+        div[data-testid="stMainBlockContainer"],
+        div[data-testid="stAppViewBlockContainer"] {
+            max-width: 100% !important;
+            width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
+    # 2. 対象レース評価データの全画面シンプル表示
     db_df = load_db()
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
