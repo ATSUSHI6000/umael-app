@@ -1933,7 +1933,7 @@ if selected_menu == "📋 レース分析・予想":
                 draft_race_name = draft_choice
                 display_target_name = draft_choice
 
-                # 💡【機能自動復元】下書き選択時、データベースに一致する解析済みデータがあれば自動ロードして画面描画
+                # 下書き選択時、データベースに一致する解析済みデータがあれば自動ロードして画面描画
                 db_df_check = load_db(selected_year="2026年")
                 if not db_df_check.empty and "レース名" in db_df_check.columns:
                     matched_draft_df = db_df_check[db_df_check["レース名"].astype(str).str.strip() == str(draft_choice).strip()]
@@ -2133,7 +2133,7 @@ if selected_menu == "📋 レース分析・予想":
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました: {e}")
 
-    # 💡【要件復元】解析完了後・下書きロード時の評価結果エリア自動描画処理
+    # 解析完了後・下書きロード時の評価結果エリア自動描画処理
     if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
         st.divider()
         render_race_evaluation_view(st.session_state["analyzed_df"], is_viewer_mode=False, show_chat=True)
@@ -2468,7 +2468,7 @@ elif selected_menu == "🔄 回顧・精度検証":
 
 
 # --------------------------------------------------
-# 📊 評価データ一覧（プール）【削除機能復元】
+# 📊 評価データ一覧（プール）【削除機能保持】
 # --------------------------------------------------
 
 elif selected_menu == "📊 評価データ一覧（プール）":
@@ -2504,7 +2504,7 @@ elif selected_menu == "📊 評価データ一覧（プール）":
 
 
 # --------------------------------------------------
-# 📝 回顧・精度検証一覧（プール）【削除機能復元】
+# 📝 回顧・精度検証一覧（プール）【削除機能保持】
 # --------------------------------------------------
 
 elif selected_menu == "📝 回顧・精度検証一覧（プール）":
@@ -2558,7 +2558,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 
 
 # --------------------------------------------------
-# 🗄 過去馬データベース（プール）【削除機能復元】
+# 🗄 過去馬データベース（プール）【削除機能保持】
 # --------------------------------------------------
 
 elif selected_menu == "🗄 過去馬データベース（プール）":
@@ -2592,7 +2592,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         disp_db_df = sanitize_dataframe_columns(db_df.copy().fillna(""))
         disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気", "年度"], errors="ignore")
 
-        # アニキ指定の厳格カラム並び順（29項目）
+        # カラム並び順（29項目）
         specified_column_order = [
             "確定着順", "馬番", "馬名", "確定オッズ", "単勝人気", "予想人気", "総合スコア", "評価",
             "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り",
@@ -2603,7 +2603,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         existing_cols = [c for c in specified_column_order if c in disp_db_df.columns]
         disp_db_df = disp_db_df[existing_cols]
 
-        # プログレスバー（緑色グラフ付き）設定
+        # プログレスバー設定
         col_config_db = {
             "総合スコア": st.column_config.ProgressColumn(
                 "総合スコア",
