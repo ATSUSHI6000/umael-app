@@ -84,7 +84,7 @@ def clean_pop_number(val):
 
 
 def extract_year_from_race_name(race_name):
-    """レース名から西暦（例: 2026）を自動判定"""
+    """レース名から西暦（例: 2026）を自動判定（基本デフォルト2026年）"""
     if not race_name:
         return "2026"
     m = re.search(r"(20\d{2})", str(race_name))
@@ -657,8 +657,43 @@ def sanitize_dataframe_columns(df):
     return df
 
 
-def load_db(selected_year="全期間"):
-    """年度別管理（data/{YYYY}/umael_database.csv）対応型ロード関数"""
+def migrate_existing_data_to_2026():
+    """ルートディレクトリや旧保存先のデータ（72件等）を自動検出し、data/2026/umael_database.csvへ自動移行"""
+    year_2026_dir = os.path.join(DATA_DIR, "2026")
+    os.makedirs(year_2026_dir, exist_ok=True)
+    year_2026_file = os.path.join(year_2026_dir, DB_FILE)
+
+    if os.path.exists(DB_FILE):
+        try:
+            root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+            if not root_df.empty:
+                root_df = sanitize_dataframe_columns(root_df)
+                if "年度" not in root_df.columns and "レース名" in root_df.columns:
+                    root_df["年度"] = root_df["レース名"].apply(extract_year_from_race_name)
+                elif "年度" not in root_df.columns:
+                    root_df["年度"] = "2026"
+
+                root_df["年度"] = root_df["年度"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
+
+                if os.path.exists(year_2026_file):
+                    y2026_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
+                    combined = pd.concat([y2026_df, root_df], ignore_index=True)
+                    combined = combined.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
+                    combined.to_csv(year_2026_file, index=False, encoding="utf-8-sig")
+                else:
+                    root_df.to_csv(year_2026_file, index=False, encoding="utf-8-sig")
+
+                # ルートDBファイルも最新状態に整合
+                root_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+
+
+def load_db(selected_year="2026年"):
+    """2026年標準年度管理（data/2026/umael_database.csv）ロード関数（自動移行付き）"""
+    # 起動・ロード時に自動データ移行を実施
+    migrate_existing_data_to_2026()
+
     all_dfs = []
 
     # メインルートDB読み込み
@@ -669,11 +704,20 @@ def load_db(selected_year="全期間"):
         except Exception:
             pass
 
-    # 年度別フォルダ（data/202X/umael_database.csv）読み込み
+    # 2026年用フォルダ（data/2026/umael_database.csv）読み込み
+    year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
+    if os.path.exists(year_2026_file):
+        try:
+            sub_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
+            all_dfs.append(sub_df)
+        except Exception:
+            pass
+
+    # その他存在する年度別フォルダも一応保持読み込み
     if os.path.exists(DATA_DIR):
         for entry in os.listdir(DATA_DIR):
             y_dir = os.path.join(DATA_DIR, entry)
-            if os.path.isdir(y_dir):
+            if os.path.isdir(y_dir) and entry != "2026":
                 y_file = os.path.join(y_dir, DB_FILE)
                 if os.path.exists(y_file):
                     try:
@@ -704,8 +748,10 @@ def load_db(selected_year="全期間"):
 
     if "年度" not in combined.columns and "レース名" in combined.columns:
         combined["年度"] = combined["レース名"].apply(extract_year_from_race_name)
+    elif "年度" not in combined.columns:
+        combined["年度"] = "2026"
 
-    # 年度フィルター処理
+    # 年度フィルター処理（2026年標準）
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
         combined = combined[combined["年度"].astype(str) == target_y].reset_index(drop=True)
@@ -714,13 +760,13 @@ def load_db(selected_year="全期間"):
 
 
 def get_available_years_in_db():
-    """データベース内に存在する年度一覧を取得"""
+    """データベース内に存在する年度一覧を取得（2026年メイン）"""
     df = load_db(selected_year="全期間")
     if df.empty or "年度" not in df.columns:
-        return ["2026年", "2025年"]
+        return ["2026年"]
     years = sorted(df["年度"].dropna().unique().tolist(), reverse=True)
-    formatted = [f"{y}年" for y in years if str(y).isdigit()]
-    return formatted if formatted else ["2026年", "2025年"]
+    formatted = [f"{y}年" for y in years if str(y).isdigit() and str(y) != "2025"]
+    return formatted if formatted else ["2026年"]
 
 
 def parse_json_ai_output(result_text):
@@ -736,7 +782,6 @@ def parse_json_ai_output(result_text):
 
         data = json.loads(clean_text)
 
-        # 複数レース構造 {"races": [...]} か単一レース構造かを柔軟に判定
         if isinstance(data, dict) and "races" in data and isinstance(data["races"], list):
             race_list = data["races"]
         elif isinstance(data, list):
@@ -880,7 +925,7 @@ def render_umael_chat_ui(df, race_title):
 
         if not gemini_key:
             with st.chat_message("assistant"):
-                st.error("⚠️ Gemini API Key が読み込めません。`st.secrets[\"GEMINI_API_KEY\"]` またはシステム設定で API Key を設定してください！")
+                st.error("⚠️ Gemini API Key が読み込めません。システム設定で API Key を設定してください！")
             return
 
         with st.chat_message("assistant"):
@@ -1214,7 +1259,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             f"【3連複 軸1頭流し】 {h_num} － {aite_str}",
         ]
 
-    # ★ 共有URL生成ドメイン厳密固定
+    # 共有URL生成ドメイン厳密固定
     encoded_race = urllib.parse.quote(str(race_title))
     share_url = f"https://umael-pro.streamlit.app/?mode=share&race={encoded_race}"
 
@@ -1521,7 +1566,7 @@ st.markdown(
 )
 
 
-# ★ 共有モード（mode=share）表示制御 ＆ ルーティング
+# 共有モード（mode=share）表示制御 ＆ ルーティング
 query_params = st.query_params
 mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
@@ -1546,7 +1591,7 @@ if mode_param == "share" and race_param:
     </style>
     """, unsafe_allow_html=True)
 
-    db_df = load_db(selected_year="全期間")
+    db_df = load_db(selected_year="2026年")
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
         if not matched_df.empty:
@@ -1596,20 +1641,20 @@ if "uploader_key_ver" not in st.session_state:
 
 
 def save_to_db(new_df):
-    """ルートおよび年度別フォルダ（data/{YYYY}/umael_database.csv）へ全レース個別・自動分類保存"""
+    """ルートおよび 2026年用フォルダ（data/2026/umael_database.csv）へ一括格納・分類保存"""
     if new_df is None or new_df.empty:
-        return load_db(selected_year="全期間")
+        return load_db(selected_year="2026年")
     
     clean_save_df = sanitize_dataframe_columns(new_df)
     clean_save_df = clean_save_df.drop(columns=["総合スコアグラフ", "軸ヒモ切り", "人気"], errors="ignore")
 
     if "レース名" not in clean_save_df.columns:
-        return load_db(selected_year="全期間")
+        return load_db(selected_year="2026年")
 
     if "年度" not in clean_save_df.columns:
         clean_save_df["年度"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
+    clean_save_df["年度"] = clean_save_df["年度"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
 
-    # 複数レースが含まれている場合でも、レース名ごとにグループ化して全レース個別に保存処理を実行
     races = clean_save_df["レース名"].unique()
 
     for race_n in races:
@@ -1617,7 +1662,7 @@ def save_to_db(new_df):
         if race_sub_df.empty:
             continue
 
-        target_year = race_sub_df["年度"].iloc[0] if "年度" in race_sub_df.columns else extract_year_from_race_name(race_n)
+        target_year = "2026"  # 年度は2026年ベースに一本化
 
         # 1. ルート DB 保存
         if os.path.exists(DB_FILE):
@@ -1633,8 +1678,8 @@ def save_to_db(new_df):
         else:
             race_sub_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-        # 2. 年度別フォルダ（data/{target_year}/umael_database.csv）保存
-        year_dir = os.path.join(DATA_DIR, str(target_year))
+        # 2. 2026年用フォルダ（data/2026/umael_database.csv）保存
+        year_dir = os.path.join(DATA_DIR, target_year)
         os.makedirs(year_dir, exist_ok=True)
         year_db_path = os.path.join(year_dir, DB_FILE)
 
@@ -1650,7 +1695,7 @@ def save_to_db(new_df):
         else:
             race_sub_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
-    return load_db(selected_year="全期間")
+    return load_db(selected_year="2026年")
 
 
 def update_db_with_recap(race_name, result_df, memo_text):
@@ -1700,18 +1745,17 @@ def update_db_with_recap(race_name, result_df, memo_text):
 
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-        # 年度別フォルダへも反映保存
-        year_val = extract_year_from_race_name(race_name)
-        year_db_path = os.path.join(DATA_DIR, str(year_val), DB_FILE)
-        if os.path.exists(year_db_path):
-            df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+        # 2026年フォルダへも確実に反省保存
+        year_db_path = os.path.join(DATA_DIR, "2026", DB_FILE)
+        os.makedirs(os.path.join(DATA_DIR, "2026"), exist_ok=True)
+        df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
     except Exception as e:
         st.warning(f"⚠️ データベースの回顧・着順プール保存中に注意: {e}")
 
 
 def delete_race_from_db(race_name):
-    """ルートおよび全年度別フォルダ（data/{YYYY}/umael_database.csv）から指定レースの行を完全削除"""
+    """ルートおよび data/2026/umael_database.csv （全年度フォルダ）から指定レースの行を完全一括削除"""
     if not race_name or not str(race_name).strip():
         return False
     
@@ -1729,7 +1773,7 @@ def delete_race_from_db(race_name):
         except Exception:
             pass
 
-    # 2. すべての年度別フォルダ（data/YYYY/umael_database.csv）から一括削除
+    # 2. data/2026/ および全年度別フォルダから一括削除
     if os.path.exists(DATA_DIR):
         for entry in os.listdir(DATA_DIR):
             y_dir = os.path.join(DATA_DIR, entry)
@@ -1852,7 +1896,7 @@ def batch_register_past_race(api_key, active_rules, past_files, past_text_memo, 
 
 【出力要件】
 1. 1つのレースに限らず、資料に含まれるすべてのレース（G1, G2, G3, 地方ダート重賞, 海外重賞問わず）を漏れなく抽出すること。
-2. 各レースの `race_name`: 必ず YYYYMMDD_レース名_グレード 形式（例: 20251026_菊花賞_G1, 20260118_日経新春杯_G2 等）を特定。
+2. 各レースの `race_name`: 必ず YYYYMMDD_レース名_グレード 形式（例: 20261026_菊花賞_G1, 20260118_日経新春杯_G2 等）を特定。
 3. `horses`: 1番〜最終馬番までの全出走馬について、各評価点、スコア、評価ランク、印（軸,ヒモ,注,切り）に加え、確定着順(`rank`)、単勝人気(`single_pop`)、確定オッズ(`odds`)、タイム(`time`)、上り3F(`agari`)、勝因・敗因ショートメモ(`short_memo`)、詳細解説(`memo`)を出力。
 4. 人気や着順は「人気」「着」を含めず純粋な数字（例: 1, 2）のみとすること。
 5. `recap_memo`: レース全体の展開、馬場、上位馬勝因、敗因分析をまとめた回顧レポート文章を作成。
@@ -1863,7 +1907,7 @@ def batch_register_past_race(api_key, active_rules, past_files, past_text_memo, 
 {{
   "races": [
     {{
-      "race_name": "20251026_菊花賞_G1",
+      "race_name": "20261026_菊花賞_G1",
       "confidence": "S (鉄板軸)",
       "risk_level": "★☆☆ (本命堅調)",
       "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
@@ -2309,7 +2353,7 @@ if selected_menu == "📋 レース分析・予想":
                                         delete_draft(target_draft)
                                         st.session_state.pop("selected_draft_race", None)
                                     st.session_state["analyzed_df"] = df
-                                    st.success("🎉 AI自動解析が完了し、年度別データベースに保存されました！")
+                                    st.success("🎉 AI自動解析が完了し、2026年データベースに保存されました！")
                                     st.rerun()
                             except Exception as e:
                                 st.error(f"❌ 解析中にエラーが発生しました: {e}")
@@ -2348,7 +2392,7 @@ if selected_menu == "📋 レース分析・予想":
                         if not df.empty:
                             save_to_db(df)
                             st.session_state["analyzed_df"] = df
-                            st.success("🎉 解析が完了し、年度別データベースに保存されました！")
+                            st.success("🎉 解析が完了し、2026年データベースに保存されました！")
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました: {e}")
@@ -2360,7 +2404,7 @@ if selected_menu == "📋 レース分析・予想":
 
 elif selected_menu == "📜 過去レース評価・結果・回顧（一括登録）":
     st.subheader("📜 過去レース評価・結果・回顧（一括登録）")
-    st.caption("過去の重賞やデータ（CSV、テキスト、PDF、画像）から、予想評価・確定結果・回顧を一括生成してデータベースへ蓄積します。縦連結CSV（複数レース混在）はPandasで直接高速パースし全レース一括保存！")
+    st.caption("過去の重賞やデータ（CSV、テキスト、PDF、画像）から、予想評価・確定結果・回顧を一括生成して2026年データベースへ蓄積します。複数レース連結CSVはPandasで直接高速パースし一括保存！")
 
     rule_type = st.radio(
         "適用する評価ルールを選択：",
@@ -2389,11 +2433,11 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
         past_text_memo = st.text_area(
             "✏️ 過去レース手入力メモ・結果テキスト（CSV/TSV貼り付け対応）",
             height=150,
-            placeholder="例: 2025年菊花賞の確定着順・オッズ・コメント等、またはCSV/TSVテキストを直接貼り付け",
+            placeholder="例: 2026年菊花賞の確定着順・オッズ・コメント等、またはCSV/TSVテキストを直接貼り付け",
             key="past_batch_memo"
         )
 
-    if st.button("🚀 過去レースを一括解析して年度別データベースへ保存登録", use_container_width=True, type="primary"):
+    if st.button("🚀 過去レースを一括解析して2026年データベースへ保存登録", use_container_width=True, type="primary"):
         active_key = load_api_key()
         if not past_files and not past_text_memo.strip():
             st.warning("⚠️ 過去データファイルまたはメモを入力してください！")
@@ -2460,20 +2504,20 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                     if rename_map:
                                         temp_df = temp_df.rename(columns=rename_map)
                                     direct_csv_dfs.append(temp_df)
-                                    memo_text_remaining = ""  # Pandasでのパース成功時はAIへ渡さない
+                                    memo_text_remaining = ""
                                     break
                             except Exception:
                                 pass
 
                     saved_races_list = []
 
-                    # 3. Pandasで直接読み込んだ構造化データをレースごとに分割・個別保存
+                    # 3. Pandasで直接読み込んだ構造化データをレースごとに分割・2026年フォルダへ個別保存
                     if direct_csv_dfs:
                         for c_df in direct_csv_dfs:
                             c_df = sanitize_dataframe_columns(c_df)
                             if "レース名" not in c_df.columns or c_df["レース名"].dropna().empty:
                                 c_df["レース名"] = "20261008_過去一括登録レース_OP"
-                            c_df["年度"] = c_df["レース名"].apply(extract_year_from_race_name)
+                            c_df["年度"] = "2026"
                             save_to_db(c_df)
                             saved_races_list.extend(c_df["レース名"].unique().tolist())
 
@@ -2497,7 +2541,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
 
                     if saved_races_list:
                         unique_saved = list(set(saved_races_list))
-                        st.success(f"🎉 計 {len(unique_saved)} レースの過去データ（{', '.join(unique_saved[:5])}{'等' if len(unique_saved)>5 else ''}）を取り込み、年度別プールに保存登録しました！")
+                        st.success(f"🎉 計 {len(unique_saved)} レースの過去データ（{', '.join(unique_saved[:5])}{'等' if len(unique_saved)>5 else ''}）を取り込み、2026年プールに保存登録しました！")
                         st.rerun()
                     else:
                         st.error("❌ データのパース・取り込みに失敗しました。ファイル内容をご確認ください。")
@@ -2551,10 +2595,8 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
 elif selected_menu == "🔄 回顧・精度検証":
     st.subheader("🔄 レース後回顧 ＆ 全着順自動照合 ＆ ルール自動検証")
     
-    col_yr, col_rc = st.columns([1, 2])
-    with col_yr:
-        avail_years = ["全期間"] + get_available_years_in_db()
-        selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_year_select")
+    avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
+    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2629,7 +2671,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                         res_df = sanitize_dataframe_columns(res_df)
 
                         update_db_with_recap(selected_race, res_df, memo_part)
-                        st.success(f"🎉 レース「{selected_race}」の回顧・照合結果を年度別データベースに保存しました！")
+                        st.success(f"🎉 レース「{selected_race}」の回顧・照合結果を2026年データベースに保存しました！")
                         
                         styled_res_df = apply_top3_highlight(res_df)
                         st.dataframe(styled_res_df, use_container_width=True, hide_index=True)
@@ -2642,10 +2684,8 @@ elif selected_menu == "🔄 回顧・精度検証":
 elif selected_menu == "📊 評価データ一覧（プール）":
     st.subheader("📊 評価データ一覧（プール閲覧専用画面）")
     
-    col_yr, col_rc = st.columns([1, 2])
-    with col_yr:
-        avail_years = ["全期間"] + get_available_years_in_db()
-        selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="eval_year_select")
+    avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
+    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="eval_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2674,10 +2714,8 @@ elif selected_menu == "📊 評価データ一覧（プール）":
 elif selected_menu == "📝 回顧・精度検証一覧（プール）":
     st.subheader("📝 回顧・精度検証データ一覧（プール閲覧専用画面）")
 
-    col_yr, col_rc = st.columns([1, 2])
-    with col_yr:
-        avail_years = ["全期間"] + get_available_years_in_db()
-        selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_pool_year_select")
+    avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
+    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_pool_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2715,12 +2753,10 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 
 
 elif selected_menu == "🗄 過去馬データベース（プール）":
-    st.subheader("🗄️ 過去馬データベース（プール一覧・年度別閲覧）")
+    st.subheader("🗄️ 過去馬データベース（プール一覧・2026年データ管理）")
 
-    col_yr, col_rc = st.columns([1, 2])
-    with col_yr:
-        avail_years = ["全期間"] + get_available_years_in_db()
-        selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="db_year_select")
+    avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
+    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="db_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
