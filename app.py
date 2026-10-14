@@ -641,7 +641,7 @@ def render_re_evaluation_section(df, active_selected_rule, model_name):
     with st.expander("🔄 評価ルールの調整・AI再評価実行", expanded=False):
         st.write("現在のルール設定でこのレースを再解析・評価更新できます。")
         temp_rule = st.text_area("適用ルール", value=active_selected_rule, height=150)
-        if st.button("🔥 このルールで再評価を実行"):
+        if st.button("🔥 このルールで再評価を実行", type="primary"):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -1156,7 +1156,7 @@ def render_umael_chat_ui(df, race_title):
 
 
 # --------------------------------------------------
-# 🎨 デザインCSS定義＆評価画面UI
+# 🎨 デザインCSS定義（ボタンカラー青・緑・赤カスタマイズ統合）＆評価画面UI
 # --------------------------------------------------
 
 st.markdown(
@@ -1188,6 +1188,59 @@ st.markdown(
     div[data-testid="stDataFrame"] div[role="progressbar"] > div {
         background: #0bce0e !important;
         border-radius: 4px !important;
+    }
+    
+    /* -------------------------------------------------- */
+    /* 🎨 各種ボタンの役割別カラー設定 (青・緑・赤) */
+    /* -------------------------------------------------- */
+    
+    /* 1. 青色ボタン（Primary: AI解析・一括実行・メイン操作） */
+    button[data-testid="stBaseButton-primary"] {
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+        color: #ffffff !important;
+        border: 1px solid #38bdf8 !important;
+        font-weight: bold !important;
+        box-shadow: 0 2px 5px rgba(2, 132, 199, 0.4) !important;
+    }
+    button[data-testid="stBaseButton-primary"]:hover {
+        background: linear-gradient(135deg, #0369a1 0%, #075985 100%) !important;
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.7) !important;
+    }
+
+    /* 2. 緑色ボタン（保存・更新・登録・ダウンロード） */
+    button:has(p:contains("保存")),
+    button:has(p:contains("更新")),
+    button:has(p:contains("登録")),
+    button:has(p:contains("ダウンロード")) {
+        background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important;
+        color: #ffffff !important;
+        border: 1px solid #4ade80 !important;
+        font-weight: bold !important;
+        box-shadow: 0 2px 5px rgba(22, 128, 61, 0.4) !important;
+    }
+    button:has(p:contains("保存")):hover,
+    button:has(p:contains("更新")):hover,
+    button:has(p:contains("登録")):hover,
+    button:has(p:contains("ダウンロード")):hover {
+        background: linear-gradient(135deg, #166534 0%, #14532d 100%) !important;
+        box-shadow: 0 0 12px rgba(74, 222, 128, 0.7) !important;
+    }
+
+    /* 3. 赤色ボタン（削除・デンジャー系） */
+    button:has(p:contains("削除")),
+    button:has(p:contains("消去")),
+    button[data-testid="stBaseButton-primary"]:has(p:contains("削除")) {
+        background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%) !important;
+        color: #ffffff !important;
+        border: 1px solid #f87171 !important;
+        font-weight: bold !important;
+        box-shadow: 0 2px 5px rgba(185, 28, 28, 0.4) !important;
+    }
+    button:has(p:contains("削除")):hover,
+    button:has(p:contains("消去")):hover,
+    button[data-testid="stBaseButton-primary"]:has(p:contains("削除")):hover {
+        background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%) !important;
+        box-shadow: 0 0 12px rgba(248, 113, 113, 0.7) !important;
     }
     
     /* 波乱度判定カード */
@@ -2286,6 +2339,10 @@ elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
     render_field_mode_ui(active_key, active_selected_rule, selected_model)
 
 
+# --------------------------------------------------
+# ⚙️ ルール管理・アップデート（ルールファイルアップロード機能）
+# --------------------------------------------------
+
 elif selected_menu == "⚙️ ルール管理・アップデート":
     st.subheader("⚙️ 解析ルールの管理・アップデート")
     sub_tab1, sub_tab2, sub_tab3 = st.tabs([
@@ -2293,20 +2350,44 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
     ])
 
     with sub_tab1:
+        st.write("📄 **G1専用ルールファイルのアップロード（.txt）**")
+        uploaded_g1 = st.file_uploader("G1ルールファイルを選択してください", type=["txt"], key="upload_g1_rule")
+        if uploaded_g1 is not None:
+            uploaded_g1_text = uploaded_g1.read().decode("utf-8", errors="ignore")
+            if uploaded_g1_text.strip():
+                st.session_state["g1_text_val"] = uploaded_g1_text
+                st.success("📂 ファイルからG1ルールテキストを正常に読み込みました！下のテキストエリアを確認後、保存してください。")
+
         st.text_area("G1専用ルールテキスト", height=300, key="g1_text_val")
-        if st.button("💾 G1専用ルールとして更新・保存", use_container_width=True):
+        if st.button("💾 G1専用ルールとして更新・保存", use_container_width=True, key="btn_save_g1_rule"):
             save_rules_to_file(RULE_G1_FILE, st.session_state["g1_text_val"])
             st.success("🎉 G1専用ルールを更新保存しました！")
 
     with sub_tab2:
+        st.write("📄 **平場・G2・G3専用ルールファイルのアップロード（.txt）**")
+        uploaded_gen = st.file_uploader("平場・G2・G3ルールファイルを選択してください", type=["txt"], key="upload_gen_rule")
+        if uploaded_gen is not None:
+            uploaded_gen_text = uploaded_gen.read().decode("utf-8", errors="ignore")
+            if uploaded_gen_text.strip():
+                st.session_state["gen_text_val"] = uploaded_gen_text
+                st.success("📂 ファイルから平場・G2・G3ルールテキストを正常に読み込みました！下のテキストエリアを確認後、保存してください。")
+
         st.text_area("平場・G2・G3専用ルールテキスト", height=300, key="gen_text_val")
-        if st.button("💾 平場・G2・G3専用ルールとして更新・保存", use_container_width=True):
+        if st.button("💾 平場・G2・G3専用ルールとして更新・保存", use_container_width=True, key="btn_save_gen_rule"):
             save_rules_to_file(RULE_GENERAL_FILE, st.session_state["gen_text_val"])
             st.success("🎉 平場・G2・G3専用ルールを更新保存しました！")
 
     with sub_tab3:
+        st.write("📄 **北海道・洋芝専用ルールファイルのアップロード（.txt）**")
+        uploaded_hok = st.file_uploader("北海道・洋芝ルールファイルを選択してください", type=["txt"], key="upload_hok_rule")
+        if uploaded_hok is not None:
+            uploaded_hok_text = uploaded_hok.read().decode("utf-8", errors="ignore")
+            if uploaded_hok_text.strip():
+                st.session_state["hok_text_val"] = uploaded_hok_text
+                st.success("📂 ファイルから北海道・洋芝ルールテキストを正常に読み込みました！下のテキストエリアを確認後、保存してください。")
+
         st.text_area("北海道・洋芝専用ルールテキスト", height=300, key="hok_text_val")
-        if st.button("💾 北海道・洋芝専用ルールとして更新・保存", use_container_width=True):
+        if st.button("💾 北海道・洋芝専用ルールとして更新・保存", use_container_width=True, key="btn_save_hok_rule"):
             save_rules_to_file(RULE_HOKKAIDO_FILE, st.session_state["hok_text_val"])
             st.success("🎉 北海道・洋芝専用ルールを更新保存しました！")
 
@@ -2408,6 +2489,10 @@ elif selected_menu == "🔄 回顧・精度検証":
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
 
 
+# --------------------------------------------------
+# 📊 評価データ一覧（プール）【削除機能復元】
+# --------------------------------------------------
+
 elif selected_menu == "📊 評価データ一覧（プール）":
     st.subheader("📊 評価データ一覧（プール閲覧専用画面）")
     
@@ -2440,6 +2525,10 @@ elif selected_menu == "📊 評価データ一覧（プール）":
             st.info("💡 上のメニューから閲覧したいレースを選択してください。")
 
 
+# --------------------------------------------------
+# 📝 回顧・精度検証一覧（プール）【削除機能復元】
+# --------------------------------------------------
+
 elif selected_menu == "📝 回顧・精度検証一覧（プール）":
     st.subheader("📝 回顧・精度検証データ一覧（プール閲覧専用画面）")
 
@@ -2452,10 +2541,10 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         st.info("💡 回顧データが見つかりません。")
     else:
         all_races = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
-        recap_options = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
-        selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", recap_options, key="recap_pool_race_select")
+        recap_options = ["🔍 レースを選択してください..."] + all_races
+        selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", recap_options, index=0, key="recap_pool_race_select")
 
-        if selected_recap_race:
+        if selected_recap_race and selected_recap_race != "🔍 レースを選択してください...":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_recap_race}」の回顧・照合データをデータベースから完全に削除します。")
                 confirm_del_recap = st.checkbox(f"本当に「{selected_recap_race}」のデータを削除しますか？", key="del_chk_recap_pool")
@@ -2486,10 +2575,12 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                     """,
                     unsafe_allow_html=True,
                 )
+        else:
+            st.info("💡 上のメニューから閲覧したいレースを選択してください。")
 
 
 # --------------------------------------------------
-# 🗄 過去馬データベース（プール）改修箇所
+# 🗄 過去馬データベース（プール）【削除機能復元】
 # --------------------------------------------------
 
 elif selected_menu == "🗄 過去馬データベース（プール）":
@@ -2509,7 +2600,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         selected_db_race = st.selectbox("📂 表示・閲覧するレースを選択してください：", race_selector_options, key="db_race_filter_selectbox")
 
         # 個別レース削除ボタン
-        if selected_db_race != "🌐 すべてのレース（全件一括表示）":
+        if selected_db_race and selected_db_race != "🌐 すべてのレース（全件一括表示）":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_db_race}」の出走馬・成績データを過去馬データベースから完全に削除します。")
                 confirm_del_db = st.checkbox(f"本当に「{selected_db_race}」のデータを削除しますか？", key="del_chk_db_pool")
