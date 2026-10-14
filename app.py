@@ -2456,7 +2456,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                     direct_csv_dfs = []
                     remaining_files = []
 
-                    # 1. アップロードされた CSV / TSV / TXT ファイルの Pandas 直接・万能パース処理
+                    # 1. アップロードされた CSV / TSV / TXT ファイルの Pandas 直接・万能パース処理（AI不使用）
                     if past_files:
                         for pf in past_files:
                             pf.seek(0)
@@ -2466,17 +2466,16 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                 parsed_direct_df = None
                                 for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
                                     try:
-                                        # カンマ・タブ自動判定
-                                        sep = None
-                                        temp_df = pd.read_csv(io.BytesIO(bytes_data), encoding=enc, sep=sep, engine="python", dtype=str).fillna("")
+                                        # カンマ・タブ・区切り文字の自動判別
+                                        temp_df = pd.read_csv(io.BytesIO(bytes_data), encoding=enc, sep=None, engine="python", dtype=str).fillna("")
                                         
-                                        if not temp_df.empty and len(temp_df.columns) >= 3:
-                                            # カラム名の全正規化（スペース・改行完全除去）
+                                        if not temp_df.empty and len(temp_df.columns) >= 2:
+                                            # カラム名の正規化（空白・改行除去）と自動判別リネーム
                                             rename_map = {}
                                             for orig_c in temp_df.columns:
                                                 c_clean = str(orig_c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "")
                                                 
-                                                if any(k in c_clean for k in ["レース名", "レース", "Race", "タイトル"]):
+                                                if any(k in c_clean for k in ["レース名", "レース", "Race"]):
                                                     rename_map[orig_c] = "レース名"
                                                 elif any(k in c_clean for k in ["確定着順", "着順", "順位", "着"]):
                                                     rename_map[orig_c] = "確定着順"
@@ -2486,7 +2485,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                                     rename_map[orig_c] = "馬番"
                                                 elif any(k in c_clean for k in ["馬名", "競走馬名", "Horse"]):
                                                     rename_map[orig_c] = "馬名"
-                                                elif any(k in c_clean for k in ["見解", "コメント", "短評", "メモ"]):
+                                                elif any(k in c_clean for k in ["見解", "短評", "メモ", "コメント"]):
                                                     rename_map[orig_c] = "メモ"
                                                 elif any(k in c_clean for k in ["回顧", "総評", "回顧メモ"]):
                                                     rename_map[orig_c] = "回顧メモ"
@@ -2494,7 +2493,6 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                             if rename_map:
                                                 temp_df = temp_df.rename(columns=rename_map)
                                             
-                                            # 最低限「馬名」または「レース名」が含まれていれば直接パース成功
                                             if "馬名" in temp_df.columns or "レース名" in temp_df.columns or "馬番" in temp_df.columns:
                                                 parsed_direct_df = temp_df
                                                 break
@@ -2508,29 +2506,29 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                             else:
                                 remaining_files.append(pf)
 
-                    # 2. テキストエリアへの TSV/CSV 貼り付けデータの直接パース処理
+                    # 2. テキストエリアへの TSV/CSV 貼り付けデータの直接パース処理（AI不使用）
                     memo_text_remaining = past_text_memo.strip()
                     if memo_text_remaining:
                         for enc in ["utf-8-sig", "utf-8"]:
                             try:
                                 temp_df = pd.read_csv(io.StringIO(memo_text_remaining), sep=None, engine="python", dtype=str).fillna("")
-                                if not temp_df.empty and len(temp_df.columns) >= 3:
+                                if not temp_df.empty and len(temp_df.columns) >= 2:
                                     rename_map = {}
                                     for orig_c in temp_df.columns:
                                         c_clean = str(orig_c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "")
-                                        if any(k in c_clean for k in ["レース名", "レース"]):
+                                        if any(k in c_clean for k in ["レース名", "レース", "Race"]):
                                             rename_map[orig_c] = "レース名"
-                                        elif any(k in c_clean for k in ["着順", "順位", "着"]):
+                                        elif any(k in c_clean for k in ["確定着順", "着順", "順位", "着"]):
                                             rename_map[orig_c] = "確定着順"
-                                        elif any(k in c_clean for k in ["人気"]):
+                                        elif any(k in c_clean for k in ["予想人気", "単勝人気", "人気"]):
                                             rename_map[orig_c] = "予想人気"
-                                        elif any(k in c_clean for k in ["馬番"]):
+                                        elif any(k in c_clean for k in ["馬番", "馬", "NO", "No"]):
                                             rename_map[orig_c] = "馬番"
-                                        elif any(k in c_clean for k in ["馬名"]):
+                                        elif any(k in c_clean for k in ["馬名", "競走馬名", "Horse"]):
                                             rename_map[orig_c] = "馬名"
-                                        elif any(k in c_clean for k in ["見解", "メモ"]):
+                                        elif any(k in c_clean for k in ["見解", "短評", "メモ", "コメント"]):
                                             rename_map[orig_c] = "メモ"
-                                        elif any(k in c_clean for k in ["回顧"]):
+                                        elif any(k in c_clean for k in ["回顧", "総評", "回顧メモ"]):
                                             rename_map[orig_c] = "回顧メモ"
                                     if rename_map:
                                         temp_df = temp_df.rename(columns=rename_map)
@@ -2544,7 +2542,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
 
                     saved_races_list = []
 
-                    # 3. Pandasで高速・一括登録保存（107レース完全自動対応）
+                    # 3. Pandasで高速・一括登録保存（groupbyによるレース単位個別保存）
                     if direct_csv_dfs:
                         for c_df in direct_csv_dfs:
                             c_df = sanitize_dataframe_columns(c_df)
@@ -2589,27 +2587,32 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                 save_to_db(sub_race_df)
                                 saved_races_list.append(r_name)
 
-                    # 4. 画像やPDF、非構造化メモのみ Gemini AI で解析
+                    # 4. 非構造化データ（画像・PDF等）のみ Gemini AI で安全処理
                     if remaining_files or memo_text_remaining:
                         if not active_key:
                             st.error("⚠️ 画像/PDF/非構造化テキストの解析には Gemini API Key が必要です。")
                         else:
-                            raw_json = batch_register_past_race(
-                                active_key, active_selected_rule, remaining_files, memo_text_remaining, selected_model
-                            )
-                            parsed_df = parse_json_ai_output(raw_json)
-                            if not parsed_df.empty:
-                                save_to_db(parsed_df)
-                                for r_title in parsed_df["レース名"].unique():
-                                    sub_r_df = parsed_df[parsed_df["レース名"] == r_title]
-                                    if "回顧メモ" in sub_r_df.columns and str(sub_r_df["回顧メモ"].iloc[0]).strip():
-                                        recap_text = str(sub_r_df["回顧メモ"].iloc[0]).strip()
-                                        update_db_with_recap(r_title, sub_r_df, recap_text)
-                                    saved_races_list.append(r_title)
+                            try:
+                                raw_json = batch_register_past_race(
+                                    active_key, active_selected_rule, remaining_files, memo_text_remaining, selected_model
+                                )
+                                parsed_df = parse_json_ai_output(raw_json)
+                                if not parsed_df.empty:
+                                    save_to_db(parsed_df)
+                                    for r_title in parsed_df["レース名"].unique():
+                                        sub_r_df = parsed_df[parsed_df["レース名"] == r_title]
+                                        if "回顧メモ" in sub_r_df.columns and str(sub_r_df["回顧メモ"].iloc[0]).strip():
+                                            recap_text = str(sub_r_df["回顧メモ"].iloc[0]).strip()
+                                            update_db_with_recap(r_title, sub_r_df, recap_text)
+                                        saved_races_list.append(r_title)
+                            except Exception as ai_e:
+                                st.warning(f"⚠️ 非構造化データ（画像/PDF）のAI解析中に注意: {ai_e}")
 
+                    # 5. 画面表示・ユーザーフィードバックの強化
                     if saved_races_list:
                         unique_saved = sorted(list(set(saved_races_list)))
-                        st.success(f"🎉 計 {len(unique_saved)} レースの過去データを正しく一括パースし、2026年プールへ保存登録しました！")
+                        race_list_str = "\n".join([f"・{r}" for r in unique_saved])
+                        st.success(f"🎉 計 {len(unique_saved)} レースの取り込みが完了しました！\n\n【登録完了レース一覧】\n{race_list_str}")
                         st.rerun()
                     else:
                         st.error("❌ データのパース・取り込みに失敗しました。ファイル内容をご確認ください。")
