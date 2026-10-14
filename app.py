@@ -31,8 +31,44 @@ DRAFTS_DIR = "race_drafts"
 
 
 # --------------------------------------------------
-# 🛠 共通ヘルパー関数・クレンジング定義
+# 🛠 共通ヘルパー関数・クレンジング定義・カラーリング関数
 # --------------------------------------------------
+
+def apply_top3_highlight(df):
+    """1着・2着・3着の行にカラーリング（1着:薄赤、2着:薄青、3着:薄緑）を適用する関数"""
+    if df is None or df.empty:
+        return df
+
+    rank_col = None
+    for col in ["確定着順", "着順", "順位", "着"]:
+        if col in df.columns:
+            rank_col = col
+            break
+
+    if not rank_col:
+        return df
+
+    def highlight_row(row):
+        val = row.get(rank_col)
+        if pd.isna(val) or val is None:
+            return [''] * len(row)
+
+        s = re.sub(r"\D", "", str(val))
+        if s:
+            try:
+                rank = int(s)
+                if rank == 1:
+                    return ['background-color: #ffe6e6; color: #990000; font-weight: bold;'] * len(row)  # 1着: 薄赤/赤字
+                elif rank == 2:
+                    return ['background-color: #e6f2ff; color: #004085; font-weight: bold;'] * len(row)  # 2着: 薄青/青字
+                elif rank == 3:
+                    return ['background-color: #e2f0d9; color: #276a3c; font-weight: bold;'] * len(row)  # 3着: 薄緑/緑字
+            except ValueError:
+                pass
+        return [''] * len(row)
+
+    return df.style.apply(highlight_row, axis=1)
+
 
 def clean_pop_number(val):
     """「1人気」「1番人気」「1番」などの表記から「人気」「番」を除去し数字のみに整形"""
@@ -2473,7 +2509,10 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                         update_db_with_recap(selected_race, res_df, memo_part)
                         st.success(f"🎉 レース「{selected_race}」の回顧・照合結果を年度別データベースに保存しました！")
-                        st.dataframe(res_df, use_container_width=True, hide_index=True)
+                        
+                        # ★ 1着(薄赤)・2着(薄青)・3着(薄緑) のカラーリングを適用して描画
+                        styled_res_df = apply_top3_highlight(res_df)
+                        st.dataframe(styled_res_df, use_container_width=True, hide_index=True)
                         st.info(memo_part)
 
                     except Exception as e:
@@ -2525,7 +2564,10 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             disp_result_df = sanitize_dataframe_columns(race_df[target_cols].copy())
 
             st.markdown(f"### 🏆 【{selected_recap_race}】 全頭確定着順 ＆ 照合結果")
-            st.dataframe(disp_result_df, use_container_width=True, hide_index=True)
+            
+            # ★ 1着(薄赤)・2着(薄青)・3着(薄緑) のカラーリングを適用して描画
+            styled_disp_df = apply_top3_highlight(disp_result_df)
+            st.dataframe(styled_disp_df, use_container_width=True, hide_index=True)
 
             if recap_text:
                 st.markdown(f"<div class='recap-box'>{recap_text}</div>", unsafe_allow_html=True)
@@ -2554,14 +2596,14 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
-            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+            st.dataframe(apply_top3_highlight(filtered_df), use_container_width=True, hide_index=True)
         else:
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名）", "")
             if search_race:
                 mask = disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) | disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
-                st.dataframe(disp_db_df[mask], use_container_width=True, hide_index=True)
+                st.dataframe(apply_top3_highlight(disp_db_df[mask]), use_container_width=True, hide_index=True)
             else:
-                st.dataframe(disp_db_df, use_container_width=True, hide_index=True)
+                st.dataframe(apply_top3_highlight(disp_db_df), use_container_width=True, hide_index=True)
 
         csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button("📦 CSVで一括ダウンロード", data=csv_data, file_name=f"umael_db_{selected_year_filter}.csv", mime="text/csv")
