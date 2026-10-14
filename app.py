@@ -618,6 +618,75 @@ def safe_int(val, default=0):
 
 
 # --------------------------------------------------
+# 🛠 補完追加: 未定義エラー解消用関数 (2件)
+# --------------------------------------------------
+
+def render_re_evaluation_section(df, active_selected_rule, model_name):
+    """評価結果画面内の AI再評価実行セクション"""
+    with st.expander("🔄 評価ルールの調整・AI再評価実行", expanded=False):
+        st.write("現在のルール設定でこのレースを再解析・評価更新できます。")
+        temp_rule = st.text_area("適用ルール", value=active_selected_rule, height=150)
+        if st.button("🔥 このルールで再評価を実行"):
+            active_key = load_api_key()
+            if not active_key:
+                st.error("⚠️ Gemini API Key が設定されていません。")
+            else:
+                with st.spinner("🏇 ルール適用でAI再評価中..."):
+                    try:
+                        cols = [c for c in ["馬番", "馬名", "総合スコア", "評価", "メモ"] if c in df.columns]
+                        context_str = df[cols].to_string(index=False)
+                        res_text = analyze_data_with_gemini(
+                            active_key, temp_rule,
+                            f"【再解析対象】:\n{context_str}", [],
+                            "", [], "", [], "", [], "",
+                            model_name
+                        )
+                        new_df = parse_json_ai_output(res_text)
+                        if not new_df.empty:
+                            save_to_db(new_df)
+                            st.session_state["analyzed_df"] = new_df
+                            st.success("🎉 再評価が完了しました！")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 再評価中にエラーが発生しました: {e}")
+
+
+def render_field_mode_ui(active_key, active_selected_rule, selected_model):
+    """現地観戦用（勝負5R厳選）画面UI"""
+    st.subheader("🏇 現地観戦用（勝負5R厳選モード）")
+    st.caption("現地やウインズ等で勝負する最大5レースを一括アップロードし、効率的に短時間でAI解析します！")
+
+    field_files = st.file_uploader(
+        "📁 厳選レースデータ（最大5レース分） (.txt / .csv / .pdf / .png / .jpg)",
+        type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="field_mode_file_uploader"
+    )
+
+    if st.button("🔥 厳選5Rを一括解析する", use_container_width=True, type="primary"):
+        if not active_key:
+            st.error("⚠️ Gemini API Key が設定されていません。")
+        elif not field_files:
+            st.warning("⚠️ 解析するレースデータをアップロードしてください！")
+        else:
+            with st.spinner("🏇 現地観戦用 厳選レースを一括AI解析中..."):
+                try:
+                    t1, p1 = prepare_file_parts(field_files, pdf_page_option="1ページ目のみ")
+                    result_text = analyze_data_with_gemini(
+                        active_key, active_selected_rule,
+                        t1, p1, "", [], "", [], "", [], "",
+                        selected_model
+                    )
+                    df = parse_json_ai_output(result_text)
+                    if not df.empty:
+                        save_to_db(df)
+                        st.success("🎉 現地観戦用の厳選レース解析が完了し保存されました！")
+                        st.dataframe(apply_top3_highlight(df), use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"❌ 解析中にエラーが発生しました: {e}")
+
+
+# --------------------------------------------------
 # 🧼 1. 強化版データクレンジング・自動補完ロジック
 # --------------------------------------------------
 
@@ -629,7 +698,7 @@ def sanitize_dataframe_columns(df):
     # 重複列があれば安全に1つに統合（先頭を採用）
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # カラム表記揺れ吸収（リネーム）
+    # カラム表記揺れ吸収（リネーム処理）
     rename_map = {}
     for orig_c in df.columns:
         c_clean = str(orig_c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "")
@@ -659,18 +728,26 @@ def sanitize_dataframe_columns(df):
             rename_map[orig_c] = "メモ"
         elif c_clean in ["回顧", "総評", "回顧メモ"] and "回顧メモ" not in rename_map.values():
             rename_map[orig_c] = "回顧メモ"
+        elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
+            rename_map[orig_c] = "年"
 
     if rename_map:
         df = df.rename(columns=rename_map)
 
     df = df.loc[:, ~df.columns.duplicated()]
 
+    # 総合スコアの型変換・数値化クレンジング
+    if "総合スコア" in df.columns:
+        df["総合スコア"] = pd.to_numeric(
+            df["総合スコア"].astype(str).str.replace("点", "").str.strip(), errors="coerce"
+        ).fillna(0).astype(int)
+
     if "予想人気" in df.columns:
         df["予想人気"] = df["予想人気"].apply(clean_pop_number)
     if "単勝人気" in df.columns:
         df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
 
-    for col in ["評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア"]:
+    for col in ["評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア", "年"]:
         if col not in df.columns:
             df[col] = ""
 
@@ -743,9 +820,9 @@ def migrate_and_clean_all_dbs():
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
             if not root_df.empty:
                 clean_df = sanitize_dataframe_columns(root_df)
-                if "年度" not in clean_df.columns and "レース名" in clean_df.columns:
-                    clean_df["年度"] = clean_df["レース名"].apply(extract_year_from_race_name)
-                clean_df["年度"] = clean_df["年度"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
+                if "年" not in clean_df.columns and "レース名" in clean_df.columns:
+                    clean_df["年"] = clean_df["レース名"].apply(extract_year_from_race_name)
+                clean_df["年"] = clean_df["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
                 clean_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
         except Exception:
             pass
@@ -760,9 +837,9 @@ def migrate_and_clean_all_dbs():
                         ydf = pd.read_csv(y_file, dtype=str).fillna("")
                         if not ydf.empty:
                             clean_ydf = sanitize_dataframe_columns(ydf)
-                            if "年度" not in clean_ydf.columns and "レース名" in clean_ydf.columns:
-                                clean_ydf["年度"] = clean_ydf["レース名"].apply(extract_year_from_race_name)
-                            clean_ydf["年度"] = clean_ydf["年度"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
+                            if "年" not in clean_ydf.columns and "レース名" in clean_ydf.columns:
+                                clean_ydf["年"] = clean_ydf["レース名"].apply(extract_year_from_race_name)
+                            clean_ydf["年"] = clean_ydf["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
                             clean_ydf.to_csv(y_file, index=False, encoding="utf-8-sig")
                     except Exception:
                         pass
@@ -823,23 +900,25 @@ def load_db(selected_year="2026年"):
         combined["総合スコア_num"] = pd.to_numeric(combined["総合スコア"], errors="coerce").fillna(0).astype(int)
         combined = combined.sort_values(by=["レース名", "総合スコア_num"], ascending=[True, False]).drop(columns=["総合スコア_num"]).reset_index(drop=True)
 
-    if "年度" not in combined.columns and "レース名" in combined.columns:
-        combined["年度"] = combined["レース名"].apply(extract_year_from_race_name)
-    elif "年度" not in combined.columns:
-        combined["年度"] = "2026"
+    if "年" not in combined.columns and "年度" in combined.columns:
+        combined["年"] = combined["年度"]
+    elif "年" not in combined.columns and "レース名" in combined.columns:
+        combined["年"] = combined["レース名"].apply(extract_year_from_race_name)
+    elif "年" not in combined.columns:
+        combined["年"] = "2026"
 
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
-        combined = combined[combined["年度"].astype(str) == target_y].reset_index(drop=True)
+        combined = combined[combined["年"].astype(str) == target_y].reset_index(drop=True)
 
     return combined
 
 
 def get_available_years_in_db():
     df = load_db(selected_year="全期間")
-    if df.empty or "年度" not in df.columns:
+    if df.empty or "年" not in df.columns:
         return ["2026年"]
-    years = sorted(df["年度"].dropna().unique().tolist(), reverse=True)
+    years = sorted(df["年"].dropna().unique().tolist(), reverse=True)
     formatted = [f"{y}年" for y in years if str(y).isdigit() and str(y) != "2025"]
     return formatted if formatted else ["2026年"]
 
@@ -916,7 +995,7 @@ def parse_json_ai_output(result_text):
                 if h_num > 0 and h_name:
                     row_dict = {
                         "レース名": race_title,
-                        "年度": extract_year_from_race_name(race_title),
+                        "年": extract_year_from_race_name(race_title),
                         "確定着順": clean_pop_number(h.get("rank", "")),
                         "馬番": h_num,
                         "馬名": h_name,
@@ -1180,7 +1259,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
     )
 
     view_df = df.drop(
-        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気", "年度"],
+        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気", "年度", "年"],
         errors="ignore",
     ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
@@ -1502,9 +1581,9 @@ def save_to_db(new_df):
     clean_save_df["レース名"] = clean_save_df["レース名"].astype(str).str.strip()
     clean_save_df = clean_save_df[clean_save_df["レース名"] != ""]
 
-    if "年度" not in clean_save_df.columns:
-        clean_save_df["年度"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
-    clean_save_df["年度"] = clean_save_df["年度"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
+    if "年" not in clean_save_df.columns:
+        clean_save_df["年"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
+    clean_save_df["年"] = clean_save_df["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
 
     races = clean_save_df["レース名"].unique()
 
@@ -2142,7 +2221,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                 c_df["レース名"] = "20261008_過去一括登録レース_OP"
 
                             c_df["レース名"] = c_df["レース名"].astype(str).str.strip()
-                            c_df["年度"] = "2026"
+                            c_df["年"] = "2026"
 
                             if "回顧メモ" not in c_df.columns:
                                 c_df["回顧メモ"] = ""
@@ -2238,12 +2317,12 @@ elif selected_menu == "🔄 回顧・精度検証":
     st.subheader("🔄 レース後回顧 ＆ 全着順自動照合 ＆ ルール自動検証")
     
     avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
-    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_year_select")
+    selected_year_filter = st.selectbox("📅 表示対象の年を選択", avail_years, key="recap_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
     if db_df.empty:
-        st.info("💡 対象年度に予想データがありません。")
+        st.info("💡 対象年に予想データがありません。")
     else:
         races_in_db = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
         selected_race = st.selectbox("🎯 回顧対象のレースを選択してください", races_in_db)
@@ -2323,15 +2402,11 @@ elif selected_menu == "🔄 回顧・精度検証":
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
 
 
-# --------------------------------------------------
-# 📊 3. プール3箇所での「レース単位削除機能」完全実装
-# --------------------------------------------------
-
 elif selected_menu == "📊 評価データ一覧（プール）":
     st.subheader("📊 評価データ一覧（プール閲覧専用画面）")
     
     avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
-    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="eval_year_select")
+    selected_year_filter = st.selectbox("📅 表示対象の年を選択", avail_years, key="eval_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2341,7 +2416,6 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         all_races = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
         selected_eval_race = st.selectbox("🎯 閲覧・再評価する予想データ（レース）を選択してください：", all_races, key="eval_pool_race_select")
 
-        # 【削除機能 1/3】 評価データプールでの削除ボタン
         if selected_eval_race:
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_eval_race}」の評価・予想データをデータベースから完全に削除します。")
@@ -2361,7 +2435,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
     st.subheader("📝 回顧・精度検証データ一覧（プール閲覧専用画面）")
 
     avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
-    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="recap_pool_year_select")
+    selected_year_filter = st.selectbox("📅 表示対象の年を選択", avail_years, key="recap_pool_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2371,7 +2445,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         all_races = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
         selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", all_races, key="recap_pool_race_select")
 
-        # 【削除機能 2/3】 回顧・精度検証プールでの削除ボタン
         if selected_recap_race:
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_recap_race}」の回顧・照合データをデータベースから完全に削除します。")
@@ -2398,11 +2471,15 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 st.markdown(f"<div class='recap-box'>{recap_text}</div>", unsafe_allow_html=True)
 
 
+# --------------------------------------------------
+# 🗄 過去馬データベース（プール）改修箇所
+# --------------------------------------------------
+
 elif selected_menu == "🗄 過去馬データベース（プール）":
-    st.subheader("🗄️ 過去馬データベース（プール一覧・2026年データ管理）")
+    st.subheader("🗄️ 過去馬データベース（プール一覧・データ管理）")
 
     avail_years = ["2026年"] + [y for y in get_available_years_in_db() if y != "2026年"]
-    selected_year_filter = st.selectbox("📅 表示対象の年度を選択", avail_years, key="db_year_select")
+    selected_year_filter = st.selectbox("📅 表示対象の年を選択", avail_years, key="db_year_select")
 
     db_df = load_db(selected_year=selected_year_filter)
 
@@ -2414,7 +2491,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
         selected_db_race = st.selectbox("📂 表示・閲覧するレースを選択してください：", race_selector_options, key="db_race_filter_selectbox")
 
-        # 【削除機能 3/3】 過去馬DBプールでの個別レース削除ボタン
+        # 個別レース削除ボタン
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_db_race}」の出走馬・成績データを過去馬データベースから完全に削除します。")
@@ -2427,18 +2504,50 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                         st.error("❌ 削除処理に失敗しました。")
 
         disp_db_df = sanitize_dataframe_columns(db_df.copy().fillna(""))
-        disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
+        disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気", "年度"], errors="ignore")
+
+        # アニキ指定の厳格カラム並び順（29項目）
+        specified_column_order = [
+            "確定着順", "馬番", "馬名", "確定オッズ", "単勝人気", "予想人気", "総合スコア", "評価",
+            "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り",
+            "メモ", "レース名", "信頼度", "波乱度", "推奨買い目", "レース質展開予想", "回顧メモ",
+            "タイム", "上り3F", "勝因・敗因ショートメモ", "年"
+        ]
+
+        existing_cols = [c for c in specified_column_order if c in disp_db_df.columns]
+        disp_db_df = disp_db_df[existing_cols]
+
+        # プログレスバー（緑色グラフ付き）設定
+        col_config_db = {
+            "総合スコア": st.column_config.ProgressColumn(
+                "総合スコア",
+                format="%d点",
+                min_value=0,
+                max_value=100,
+                width="medium",
+                color="#0bce0e"
+            ),
+            "馬番": st.column_config.NumberColumn("馬番", width="small"),
+            "確定着順": st.column_config.TextColumn("確定着順", width="small"),
+            "予想人気": st.column_config.TextColumn("予想人気", width="small"),
+            "単勝人気": st.column_config.TextColumn("単勝人気", width="small"),
+            "メモ": st.column_config.TextColumn("メモ", width="large"),
+            "勝因・敗因ショートメモ": st.column_config.TextColumn("勝因・敗因ショートメモ", width="large"),
+        }
 
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str).str.strip() == str(selected_db_race).strip()]
-            st.dataframe(apply_top3_highlight(filtered_df), use_container_width=True, hide_index=True)
+            styled_df = apply_top3_highlight(filtered_df)
+            st.dataframe(styled_df, column_config=col_config_db, use_container_width=True, hide_index=True)
         else:
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名）", "")
             if search_race:
                 mask = disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) | disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
-                st.dataframe(apply_top3_highlight(disp_db_df[mask]), use_container_width=True, hide_index=True)
+                styled_df = apply_top3_highlight(disp_db_df[mask])
             else:
-                st.dataframe(apply_top3_highlight(disp_db_df), use_container_width=True, hide_index=True)
+                styled_df = apply_top3_highlight(disp_db_df)
+            
+            st.dataframe(styled_df, column_config=col_config_db, use_container_width=True, hide_index=True)
 
         csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button("📦 CSVで一括ダウンロード", data=csv_data, file_name=f"umael_db_{selected_year_filter}.csv", mime="text/csv")
