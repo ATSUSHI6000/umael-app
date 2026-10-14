@@ -1191,7 +1191,7 @@ st.markdown(
     }
     
     /* -------------------------------------------------- */
-    /* 🎨 アクションボタン オレンジ系一括統一設定 */
+    /* 🎨 アクションボタン オレンジ系一括統一設定 (#d84315 / #bf360c) */
     /* -------------------------------------------------- */
     div.stButton > button,
     button[data-testid="stBaseButton-secondary"],
@@ -2133,7 +2133,7 @@ if selected_menu == "📋 レース分析・予想":
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました: {e}")
 
-    # 💡【レンダリング完全復元】解析完了後・下書きロード時の評価結果エリア確実描画処理
+    # 💡【要件復元】解析完了後・下書きロード時の評価結果エリア自動描画処理
     if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
         st.divider()
         render_race_evaluation_view(st.session_state["analyzed_df"], is_viewer_mode=False, show_chat=True)
