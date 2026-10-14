@@ -1,6 +1,6 @@
 streamlit
 pandas
-google-genai
+google-generativeai
 pdfplumber
 pypdf
 beautifulsoup4
