@@ -301,6 +301,9 @@ def process_multiple_urls(urls_input_text):
 
 
 def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
+    """
+    指示2の修正: テキスト抽出結果が十分に存在するPDF/画像はPart添付を省略し過大トークンを抑削
+    """
     prompt_text = ""
     media_parts = []
 
@@ -345,19 +348,21 @@ def prepare_file_parts(files_list, pdf_page_option="1ページ目のみ"):
                             + extracted
                         )
 
-                mime = f.type
-                if not mime or mime == "application/octet-stream":
-                    if fname.lower().endswith(".pdf"):
-                        mime = "application/pdf"
-                    elif fname.lower().endswith(".png"):
-                        mime = "image/png"
-                    elif fname.lower().endswith((".jpg", ".jpeg")):
-                        mime = "image/jpeg"
+                # テキストが100文字未満、または画像等でテキスト抽出不可の場合のみバイナリPartを追加（トークン最適化）
+                if len(extracted.strip()) < 100:
+                    mime = f.type
+                    if not mime or mime == "application/octet-stream":
+                        if fname.lower().endswith(".pdf"):
+                            mime = "application/pdf"
+                        elif fname.lower().endswith(".png"):
+                            mime = "image/png"
+                        elif fname.lower().endswith((".jpg", ".jpeg")):
+                            mime = "image/jpeg"
 
-                if mime:
-                    media_parts.append(
-                        types.Part.from_bytes(data=file_bytes, mime_type=mime)
-                    )
+                    if mime:
+                        media_parts.append(
+                            types.Part.from_bytes(data=file_bytes, mime_type=mime)
+                        )
 
     return prompt_text, media_parts
 
@@ -540,18 +545,19 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
                             + extracted
                         )
 
-                mime = None
-                if original_fname.lower().endswith(".pdf"):
-                    mime = "application/pdf"
-                elif original_fname.lower().endswith(".png"):
-                    mime = "image/png"
-                elif original_fname.lower().endswith((".jpg", ".jpeg")):
-                    mime = "image/jpeg"
+                if len(extracted.strip()) < 100:
+                    mime = None
+                    if original_fname.lower().endswith(".pdf"):
+                        mime = "application/pdf"
+                    elif original_fname.lower().endswith(".png"):
+                        mime = "image/png"
+                    elif original_fname.lower().endswith((".jpg", ".jpeg")):
+                        mime = "image/jpeg"
 
-                if mime:
-                    media_parts.append(
-                        types.Part.from_bytes(data=file_bytes, mime_type=mime)
-                    )
+                    if mime:
+                        media_parts.append(
+                            types.Part.from_bytes(data=file_bytes, mime_type=mime)
+                        )
 
             if group_idx == 1:
                 t1_all += txt_content + "\n"
@@ -937,17 +943,50 @@ def get_available_years_in_db():
 
 
 def parse_json_ai_output(result_text):
+    """
+    指示1, 3, 4の修正: 
+    - マークダウン除去 ＆ 最外枠JSONオブジェクトの正規表現抽出フォールバック
+    - デバッグ用expander表示
+    - Horses配列のNPE防止・競合回避ロジック
+    """
     all_parsed_rows = []
 
+    if not result_text or not str(result_text).strip():
+        st.error("⚠️ AIからの返却レスポンスが空でした。")
+        return pd.DataFrame()
+
+    raw_text = str(result_text).strip()
+    
+    # マークダウン装飾の正規表現除去
+    clean_text = re.sub(r"^```[a-zA-Z]*\n?", "", raw_text, flags=re.MULTILINE)
+    clean_text = re.sub(r"\n?```$", "", clean_text, flags=re.MULTILINE).strip()
+
+    data = None
+    parse_error = None
+
+    # 第一試行: 直接パース
     try:
-        clean_text = result_text.strip()
-        if "```json" in clean_text:
-            clean_text = clean_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in clean_text:
-            clean_text = clean_text.split("```")[1].split("```")[0].strip()
-
         data = json.loads(clean_text)
+    except Exception as e1:
+        parse_error = str(e1)
+        # 第二試行: 最外枠のJSONオブジェクトを正規表現（r'\{.*\}'）で抽出してフォールバック
+        match = re.search(r'\{.*\}', clean_text, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+                parse_error = None  # フォールバック成功
+            except Exception as e2:
+                parse_error = f"1次エラー: {e1} | 2次(フォールバック)エラー: {e2}"
 
+    # パース失敗時のエラー画面表示とraw_textデバッグ表示
+    if data is None or parse_error:
+        st.error("❌ Gemini APIからの返却JSONのパースに失敗しました。")
+        with st.expander("🛠️ デバッグ用：エラー内容 ＆ Rawレスポンス（クリックで展開）", expanded=True):
+            st.code(f"エラー詳細: {parse_error}", language="text")
+            st.text_area("AIから返ってきたRawレスポンス", value=raw_text, height=250)
+        return pd.DataFrame()
+
+    try:
         if isinstance(data, dict) and "races" in data and isinstance(data["races"], list):
             race_list = data["races"]
         elif isinstance(data, list):
@@ -959,35 +998,41 @@ def parse_json_ai_output(result_text):
             if not isinstance(race_data, dict):
                 continue
 
-            race_title = str(race_data.get("race_name", "20261008_競馬解析_OP")).strip()
-            confidence = race_data.get("confidence", "")
-            risk_level = race_data.get("risk_level", "")
-            race_quality_and_tenkai = race_data.get("race_quality_and_tenkai", "")
-            recommended_tickets = race_data.get("recommended_tickets", [])
-            recap_memo = race_data.get("recap_memo", "")
+            race_title = str(race_data.get("race_name") or "20261008_競馬解析_OP").strip()
+            confidence = race_data.get("confidence") or ""
+            risk_level = race_data.get("risk_level") or ""
+            race_quality_and_tenkai = race_data.get("race_quality_and_tenkai") or ""
+            recommended_tickets = race_data.get("recommended_tickets") or []
+            recap_memo = race_data.get("recap_memo") or ""
 
-            horses = race_data.get("horses", [])
+            horses = race_data.get("horses") or []
 
-            for h in horses:
+            for idx, h in enumerate(horses):
                 if not isinstance(h, dict):
                     continue
-                h_num = safe_int(h.get("horse_num", 0))
-                h_name = str(h.get("horse_name", "")).strip()
+
+                # 指示4: null や 空文字が来ても落ちないように補完ロジックを追加
+                raw_h_num = h.get("horse_num")
+                h_num = safe_int(raw_h_num, default=idx + 1)
+                
+                raw_h_name = h.get("horse_name")
+                h_name = str(raw_h_name).strip() if raw_h_name is not None and str(raw_h_name).strip() != "" else f"競走馬_{h_num}"
+
                 pop_val = clean_pop_number(h.get("pop", "-"))
-                total_score = safe_int(h.get("total_score", 80))
-                rank_eval = str(h.get("eval", "A")).strip()
+                total_score = safe_int(h.get("total_score"), default=80)
+                rank_eval = str(h.get("eval") or "A").strip()
 
-                score_shubahyou = safe_int(h.get("score_shubahyou", total_score))
-                score_kettou = safe_int(h.get("score_kettou", total_score))
-                score_choukyou = safe_int(h.get("score_choukyou", total_score))
-                score_kin5so = safe_int(h.get("score_kin5so", total_score))
-                score_tenkai = safe_int(h.get("score_tenkai", total_score))
-                score_baba = safe_int(h.get("score_baba", total_score))
+                score_shubahyou = safe_int(h.get("score_shubahyou"), default=total_score)
+                score_kettou = safe_int(h.get("score_kettou"), default=total_score)
+                score_choukyou = safe_int(h.get("score_choukyou"), default=total_score)
+                score_kin5so = safe_int(h.get("score_kin5so"), default=total_score)
+                score_tenkai = safe_int(h.get("score_tenkai"), default=total_score)
+                score_baba = safe_int(h.get("score_baba"), default=total_score)
 
-                ai_jiku = str(h.get("jiku", "")).strip() == "〇"
-                ai_himo = str(h.get("himo", "")).strip() == "〇"
-                ai_chu = str(h.get("注", h.get("chu", ""))).strip() == "〇"
-                ai_kiri = str(h.get("kiri", "")).strip() == "〇"
+                ai_jiku = str(h.get("jiku") or "").strip() == "〇"
+                ai_himo = str(h.get("himo") or "").strip() == "〇"
+                ai_chu = str(h.get("注") or h.get("chu") or "").strip() == "〇"
+                ai_kiri = str(h.get("kiri") or "").strip() == "〇"
 
                 jiku, himo, chu, kiri = "", "", "", ""
                 if ai_jiku or rank_eval in ["S", "S+", "A+"]:
@@ -999,54 +1044,53 @@ def parse_json_ai_output(result_text):
                 else:
                     kiri = "〇"
 
-                memo = str(h.get("memo", "")).strip()
+                memo = str(h.get("memo") or "").strip()
                 if not memo or len(memo) < 10:
                     memo = (
                         f"【評価理由】総合スコア{total_score}点。データ・血統・適性面を考慮して評価を算出。"
                     )
 
-                if h_num > 0 and h_name:
-                    row_dict = {
-                        "レース名": race_title,
-                        "年": extract_year_from_race_name(race_title),
-                        "確定着順": clean_pop_number(h.get("rank", "")),
-                        "馬番": h_num,
-                        "馬名": h_name,
-                        "総合スコア": total_score,
-                        "評価": rank_eval,
-                        "予想人気": pop_val,
-                        "単勝人気": clean_pop_number(h.get("single_pop", "")),
-                        "確定オッズ": str(h.get("odds", "")).strip(),
-                        "タイム": str(h.get("time", "")).strip(),
-                        "上り3F": str(h.get("agari", "")).strip(),
-                        "勝因・敗因ショートメモ": str(h.get("short_memo", "")).strip(),
-                        "出馬表点": score_shubahyou,
-                        "血統点": score_kettou,
-                        "調教点": score_choukyou,
-                        "近5走点": score_kin5so,
-                        "展開点": score_tenkai,
-                        "馬場点": score_baba,
-                        "軸": jiku,
-                        "ヒモ": himo,
-                        "注": chu,
-                        "切り": kiri,
-                        "メモ": memo,
-                    }
-                    if confidence:
-                        row_dict["信頼度"] = confidence
-                    if risk_level:
-                        row_dict["波乱度"] = risk_level
-                    if race_quality_and_tenkai:
-                        row_dict["レース質展開予想"] = race_quality_and_tenkai
-                    if recommended_tickets:
-                        row_dict["推奨買い目"] = json.dumps(recommended_tickets, ensure_ascii=False)
-                    if recap_memo:
-                        row_dict["回顧メモ"] = recap_memo
+                row_dict = {
+                    "レース名": race_title,
+                    "年": extract_year_from_race_name(race_title),
+                    "確定着順": clean_pop_number(h.get("rank", "")),
+                    "馬番": h_num,
+                    "馬名": h_name,
+                    "総合スコア": total_score,
+                    "評価": rank_eval,
+                    "予想人気": pop_val,
+                    "単勝人気": clean_pop_number(h.get("single_pop", "")),
+                    "確定オッズ": str(h.get("odds") or "").strip(),
+                    "タイム": str(h.get("time") or "").strip(),
+                    "上り3F": str(h.get("agari") or "").strip(),
+                    "勝因・敗因ショートメモ": str(h.get("short_memo") or "").strip(),
+                    "出馬表点": score_shubahyou,
+                    "血統点": score_kettou,
+                    "調教点": score_choukyou,
+                    "近5走点": score_kin5so,
+                    "展開点": score_tenkai,
+                    "馬場点": score_baba,
+                    "軸": jiku,
+                    "ヒモ": himo,
+                    "注": chu,
+                    "切り": kiri,
+                    "メモ": memo,
+                }
+                if confidence:
+                    row_dict["信頼度"] = confidence
+                if risk_level:
+                    row_dict["波乱度"] = risk_level
+                if race_quality_and_tenkai:
+                    row_dict["レース質展開予想"] = race_quality_and_tenkai
+                if recommended_tickets:
+                    row_dict["推奨買い目"] = json.dumps(recommended_tickets, ensure_ascii=False)
+                if recap_memo:
+                    row_dict["回顧メモ"] = recap_memo
 
-                    all_parsed_rows.append(row_dict)
+                all_parsed_rows.append(row_dict)
 
     except Exception as e:
-        st.warning(f"⚠️ JSON読み込み処理中: {e}")
+        st.error(f"⚠️ 解析構造のデータ変換中にエラーが発生しました: {e}")
 
     if not all_parsed_rows:
         return pd.DataFrame()
@@ -1744,6 +1788,11 @@ def analyze_data_with_gemini(
     text_group5,
     model_name="gemini-3.8-flash",
 ):
+    """
+    指示2の修正: 
+    - response_mime_type="application/json" 設定
+    - プロンプト文末で「途切れず完全なJSON形式のみ出力」を強調追加
+    """
     client = genai.Client(api_key=api_key)
 
     json_prompt = f"""{active_rules}
@@ -1767,8 +1816,8 @@ def analyze_data_with_gemini(
 === 【グループ5：プロ予想・YouTube字幕・Web参考URL】 ===
 {text_group5}
 
-【出力形式】
-純粋なJSONのみを出力してください。
+【出力形式・厳守事項】
+必ず有効なJSONフォーマットのみを出力し、マークダウン装飾や解説テキストを含めず、途中で途切れさせずに最後まで完全に出力してください。
 """
 
     contents_payload = [json_prompt]
