@@ -674,6 +674,10 @@ def sanitize_dataframe_columns(df):
     if df.empty:
         return df
     df = df.copy()
+
+    # 重複列があれば安全に1つに統合（先頭を採用）
+    df = df.loc[:, ~df.columns.duplicated()]
+
     if "予想人気" in df.columns:
         df["予想人気"] = df["予想人気"].apply(clean_pop_number)
     if "単勝人気" in df.columns:
@@ -2413,7 +2417,7 @@ if selected_menu == "📋 レース分析・予想":
 
 elif selected_menu == "📜 過去レース評価・結果・回顧（一括登録）":
     st.subheader("📜 過去レース評価・結果・回顧（一括登録）")
-    st.caption("全108レース・2,600行超が縦連結されたCSV（『競馬分析用シート_2026- - 重賞レース分析_2026.csv』等）やテキストをPandasで直接・一瞬で超高速パースし、`data/2026/` へ一括保存登録します！")
+    st.caption("全107レース・2,600行超が縦連結されたCSV（『競馬分析用シート_2026- - 重賞レース分析_2026.csv』等）やテキストをPandasで直接・一瞬で超高速パースし、`data/2026/` へ一括保存登録します！")
 
     rule_type = st.radio(
         "適用する基本評価ルールを選択：",
@@ -2469,7 +2473,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                         raw_text = bytes_data.decode(enc)
                                         lines = raw_text.splitlines()
                                         
-                                        # ★ 先頭15行以内からヘッダー（列名）行を自動特定する完全対策
+                                        # 先頭15行以内からヘッダー（列名）行を自動特定する完全対策
                                         header_idx = -1
                                         for idx, line in enumerate(lines[:15]):
                                             if any(kw in line for kw in ["レース名", "レース", "着順", "馬名", "馬番"]):
@@ -2482,25 +2486,37 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                             
                                             if not temp_df.empty and len(temp_df.columns) >= 2:
                                                 rename_map = {}
+                                                cols_exact = [str(c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "") for c in temp_df.columns]
+
                                                 for orig_c in temp_df.columns:
                                                     c_clean = str(orig_c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "")
-                                                    if any(k in c_clean for k in ["レース名", "レース", "Race"]):
-                                                        rename_map[orig_c] = "レース名"
-                                                    elif any(k in c_clean for k in ["確定着順", "着順", "順位", "着"]):
+                                                    
+                                                    # ★ 厳密完全一致ロジック（誤変換・重複防止）
+                                                    if c_clean in ["着順", "確定着順", "順位", "着"]:
                                                         rename_map[orig_c] = "確定着順"
-                                                    elif any(k in c_clean for k in ["予想人気", "単勝人気", "人気"]):
-                                                        rename_map[orig_c] = "予想人気"
-                                                    elif any(k in c_clean for k in ["馬番", "馬", "NO", "No"]):
-                                                        rename_map[orig_c] = "馬番"
-                                                    elif any(k in c_clean for k in ["馬名", "競走馬名", "Horse"]):
+                                                    elif c_clean in ["レース名", "レース", "Race", "RACE"]:
+                                                        rename_map[orig_c] = "レース名"
+                                                    elif c_clean in ["馬名", "競走馬名", "Horse", "HORSE"]:
                                                         rename_map[orig_c] = "馬名"
-                                                    elif any(k in c_clean for k in ["見解", "短評", "メモ", "コメント"]):
+                                                    elif c_clean in ["馬番", "馬No", "馬NO", "No", "NO"]:
+                                                        rename_map[orig_c] = "馬番"
+                                                    elif c_clean in ["予想人気"]:
+                                                        rename_map[orig_c] = "予想人気"
+                                                    elif c_clean in ["単勝人気", "人気"]:
+                                                        if "予想人気" in cols_exact:
+                                                            rename_map[orig_c] = "単勝人気"
+                                                        else:
+                                                            rename_map[orig_c] = "予想人気"
+                                                    elif c_clean in ["メモ", "見解", "短評", "コメント"]:
                                                         rename_map[orig_c] = "メモ"
-                                                    elif any(k in c_clean for k in ["回顧", "総評", "回顧メモ"]):
+                                                    elif c_clean in ["回顧", "総評", "回顧メモ"]:
                                                         rename_map[orig_c] = "回顧メモ"
                                                 
                                                 if rename_map:
                                                     temp_df = temp_df.rename(columns=rename_map)
+                                                
+                                                # ★ 重複カラムを安全に自動除去
+                                                temp_df = temp_df.loc[:, ~temp_df.columns.duplicated()]
                                                 
                                                 parsed_direct_df = temp_df
                                                 break
@@ -2529,24 +2545,34 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                 temp_df = pd.read_csv(io.StringIO(clean_csv_text), dtype=str).fillna("")
                                 if not temp_df.empty and len(temp_df.columns) >= 2:
                                     rename_map = {}
+                                    cols_exact = [str(c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "") for c in temp_df.columns]
+
                                     for orig_c in temp_df.columns:
                                         c_clean = str(orig_c).strip().replace(" ", "").replace(" ", "").replace("\n", "").replace("\r", "")
-                                        if any(k in c_clean for k in ["レース名", "レース", "Race"]):
-                                            rename_map[orig_c] = "レース名"
-                                        elif any(k in c_clean for k in ["確定着順", "着順", "順位", "着"]):
+                                        if c_clean in ["着順", "確定着順", "順位", "着"]:
                                             rename_map[orig_c] = "確定着順"
-                                        elif any(k in c_clean for k in ["予想人気", "単勝人気", "人気"]):
-                                            rename_map[orig_c] = "予想人気"
-                                        elif any(k in c_clean for k in ["馬番", "馬", "NO", "No"]):
-                                            rename_map[orig_c] = "馬番"
-                                        elif any(k in c_clean for k in ["馬名", "競走馬名", "Horse"]):
+                                        elif c_clean in ["レース名", "レース", "Race", "RACE"]:
+                                            rename_map[orig_c] = "レース名"
+                                        elif c_clean in ["馬名", "競走馬名", "Horse", "HORSE"]:
                                             rename_map[orig_c] = "馬名"
-                                        elif any(k in c_clean for k in ["見解", "短評", "メモ", "コメント"]):
+                                        elif c_clean in ["馬番", "馬No", "馬NO", "No", "NO"]:
+                                            rename_map[orig_c] = "馬番"
+                                        elif c_clean in ["予想人気"]:
+                                            rename_map[orig_c] = "予想人気"
+                                        elif c_clean in ["単勝人気", "人気"]:
+                                            if "予想人気" in cols_exact:
+                                                rename_map[orig_c] = "単勝人気"
+                                            else:
+                                                rename_map[orig_c] = "予想人気"
+                                        elif c_clean in ["メモ", "見解", "短評", "コメント"]:
                                             rename_map[orig_c] = "メモ"
-                                        elif any(k in c_clean for k in ["回顧", "総評", "回顧メモ"]):
+                                        elif c_clean in ["回顧", "総評", "回顧メモ"]:
                                             rename_map[orig_c] = "回顧メモ"
+                                    
                                     if rename_map:
                                         temp_df = temp_df.rename(columns=rename_map)
+                                    temp_df = temp_df.loc[:, ~temp_df.columns.duplicated()]
+                                    
                                     direct_csv_dfs.append(temp_df)
                                     memo_text_remaining = ""
                             except Exception:
