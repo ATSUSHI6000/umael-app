@@ -804,7 +804,7 @@ def sanitize_dataframe_columns(df):
             else:
                 if current_eval in ["S"]:
                     jiku = "〇"
-                elif current_eval in ["A+", "A", "B+"]:
+                elif current_eval in ["S+", "A+", "A", "B+"]:
                     himo = "〇"
                 elif current_eval in ["B"]:
                     chu = "〇"
@@ -2017,7 +2017,6 @@ if selected_menu == "📋 レース分析・予想":
                             st.rerun()
 
         with btn_col2:
-            # ★ 1. 解析ボタンのプライマリカラー化（オレンジ色復元）
             if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True, type="primary"):
                 active_key = load_api_key()
                 if not active_key:
@@ -2074,7 +2073,6 @@ if selected_menu == "📋 レース分析・予想":
                     st.rerun()
 
     else:
-        # ★ 1. 解析ボタンのプライマリカラー化（オレンジ色復元）
         if st.button("🔥 AI分析を実行する", use_container_width=True, type="primary"):
             active_key = load_api_key()
             if not active_key:
@@ -2396,8 +2394,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                         
                         styled_res_df = apply_top3_highlight(res_df)
                         st.dataframe(styled_res_df, use_container_width=True, hide_index=True)
-                        
-                        # ★ 2. 回顧メモ（見解）ネイビーカード表示
+
                         st.markdown(
                             f"""
                             <div style="background-color: #0c1424; border: 2px solid #2563eb; border-radius: 10px; padding: 18px; margin-top: 15px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 0.98rem; box-shadow: 0 0 15px rgba(37, 99, 235, 0.25);">
@@ -2423,9 +2420,10 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         st.info("💡 保存されている予想データがありません。")
     else:
         all_races = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
-        selected_eval_race = st.selectbox("🎯 閲覧・再評価する予想データ（レース）を選択してください：", all_races, key="eval_pool_race_select")
+        eval_options = ["🔍 レースを選択してください..."] + all_races
+        selected_eval_race = st.selectbox("🎯 閲覧・再評価する予想データ（レース）を選択してください：", eval_options, index=0, key="eval_pool_race_select")
 
-        if selected_eval_race:
+        if selected_eval_race and selected_eval_race != "🔍 レースを選択してください...":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_eval_race}」の評価・予想データをデータベースから完全に削除します。")
                 confirm_del_eval = st.checkbox(f"本当に「{selected_eval_race}」のデータを削除しますか？", key="del_chk_eval_pool")
@@ -2438,6 +2436,8 @@ elif selected_menu == "📊 評価データ一覧（プール）":
 
             matched_df = db_df[db_df["レース名"].astype(str).str.strip() == str(selected_eval_race).strip()].copy()
             render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+        else:
+            st.info("💡 上のメニューから閲覧したいレースを選択してください。")
 
 
 elif selected_menu == "📝 回顧・精度検証一覧（プール）":
@@ -2452,7 +2452,8 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         st.info("💡 回顧データが見つかりません。")
     else:
         all_races = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
-        selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", all_races, key="recap_pool_race_select")
+        recap_options = sorted(db_df["レース名"].dropna().astype(str).str.strip().unique().tolist()) if "レース名" in db_df.columns else []
+        selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", recap_options, key="recap_pool_race_select")
 
         if selected_recap_race:
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
@@ -2476,7 +2477,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             styled_disp_df = apply_top3_highlight(disp_result_df)
             st.dataframe(styled_disp_df, use_container_width=True, hide_index=True)
 
-            # ★ 2. 回顧メモ（見解）ネイビーカード表示
             if recap_text:
                 st.markdown(
                     f"""
@@ -2559,7 +2559,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         else:
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名）", "")
             if search_race:
-                mask = disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) | disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
+                mask = disp_db_df["レース名"].astype(str).contains(search_race, na=False) | disp_db_df["馬名"].astype(str).contains(search_race, na=False)
                 styled_df = apply_top3_highlight(disp_db_df[mask])
             else:
                 styled_df = apply_top3_highlight(disp_db_df)
