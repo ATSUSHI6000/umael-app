@@ -1711,21 +1711,40 @@ def update_db_with_recap(race_name, result_df, memo_text):
 
 
 def delete_race_from_db(race_name):
+    """ルートおよび全年度別フォルダ（data/{YYYY}/umael_database.csv）から指定レースの行を完全削除"""
+    if not race_name or not str(race_name).strip():
+        return False
+    
+    target_race_str = str(race_name).strip()
+    success = False
+
+    # 1. メインルート DB から削除
     if os.path.exists(DB_FILE):
         try:
-            df = pd.read_csv(DB_FILE)
+            df = pd.read_csv(DB_FILE, dtype=str).fillna("")
             if "レース名" in df.columns:
-                new_df = df[df["レース名"].astype(str) != str(race_name)]
+                new_df = df[df["レース名"].astype(str).str.strip() != target_race_str]
                 new_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
-                
-                year_val = extract_year_from_race_name(race_name)
-                year_db_path = os.path.join(DATA_DIR, str(year_val), DB_FILE)
-                if os.path.exists(year_db_path):
-                    new_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
-                return True
+                success = True
         except Exception:
             pass
-    return False
+
+    # 2. すべての年度別フォルダ（data/YYYY/umael_database.csv）から一括削除
+    if os.path.exists(DATA_DIR):
+        for entry in os.listdir(DATA_DIR):
+            y_dir = os.path.join(DATA_DIR, entry)
+            if os.path.isdir(y_dir):
+                y_file = os.path.join(y_dir, DB_FILE)
+                if os.path.exists(y_file):
+                    try:
+                        ydf = pd.read_csv(y_file, dtype=str).fillna("")
+                        if "レース名" in ydf.columns:
+                            new_ydf = ydf[ydf["レース名"].astype(str).str.strip() != target_race_str]
+                            new_ydf.to_csv(y_file, index=False, encoding="utf-8-sig")
+                            success = True
+                    except Exception:
+                        pass
+    return success
 
 
 def clear_db():
@@ -1815,11 +1834,11 @@ def analyze_data_with_gemini(
 
 
 # --------------------------------------------------
-# 📜 新規機能：過去レース評価・結果・回顧（一括登録）
+# 📜 過去レース評価・結果・回顧（一括登録）
 # --------------------------------------------------
 
 def batch_register_past_race(api_key, active_rules, past_files, past_text_memo, model_name="gemini-3.8-flash"):
-    """過去のレースデータ・CSV・メモから「評価＋結果＋回顧」を一括抽出・生成（複数レース一括対応）"""
+    """過去のレースデータ・画像・PDF・メモから「評価＋結果＋回顧」を一括抽出・生成（複数レース一括対応）"""
     client = genai.Client(api_key=api_key)
 
     past_files_text, past_media_parts = prepare_file_parts(past_files, pdf_page_option="全ページ")
@@ -1829,7 +1848,7 @@ def batch_register_past_race(api_key, active_rules, past_files, past_text_memo, 
 
 【★過去レース評価・結果・回顧 一括生成プロンプト（複数レース対応）】
 あなたは競馬プロ解析AI「ウマエル」です。
-提供された過去のレース資料（スプレッドシートCSV、出馬表、オッズ、結果テキスト、手入力メモ）を視覚的・構造的に解析し、含まれるすべてのレースについて、過去評価データ・確定着順結果・および回顧レポートを一括抽出・生成してください。
+提供された過去のレース資料（出馬表、オッズ、結果テキスト、手入力メモ）を視覚的・構造的に解析し、含まれるすべてのレースについて、過去評価データ・確定着順結果・および回顧レポートを一括抽出・生成してください。
 
 【出力要件】
 1. 1つのレースに限らず、資料に含まれるすべてのレース（G1, G2, G3, 地方ダート重賞, 海外重賞問わず）を漏れなく抽出すること。
@@ -2341,7 +2360,7 @@ if selected_menu == "📋 レース分析・予想":
 
 elif selected_menu == "📜 過去レース評価・結果・回顧（一括登録）":
     st.subheader("📜 過去レース評価・結果・回顧（一括登録）")
-    st.caption("過去の重賞やデータ（CSV、テキスト、PDF、画像）から、予想評価・確定結果・回顧を一括生成してデータベースへ蓄積します。縦連結CSV（複数レース混在）も全レース自動抽出・一括登録に対応！")
+    st.caption("過去の重賞やデータ（CSV、テキスト、PDF、画像）から、予想評価・確定結果・回顧を一括生成してデータベースへ蓄積します。縦連結CSV（複数レース混在）はPandasで直接高速パースし全レース一括保存！")
 
     rule_type = st.radio(
         "適用する評価ルールを選択：",
@@ -2368,9 +2387,9 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
         )
     with col_p2:
         past_text_memo = st.text_area(
-            "✏️ 過去レース手入力メモ・結果テキスト",
+            "✏️ 過去レース手入力メモ・結果テキスト（CSV/TSV貼り付け対応）",
             height=150,
-            placeholder="例: 2025年菊花賞の確定着順・オッズ・コメント等",
+            placeholder="例: 2025年菊花賞の確定着順・オッズ・コメント等、またはCSV/TSVテキストを直接貼り付け",
             key="past_batch_memo"
         )
 
@@ -2384,7 +2403,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                     direct_csv_dfs = []
                     remaining_files = []
 
-                    # 1. CSV / TSV 構造化データからの全レース直接抽出
+                    # 1. アップロードされた CSV / TSV / TXT ファイルの Pandas 直接パース処理（Gemini API不使用）
                     if past_files:
                         for pf in past_files:
                             pf.seek(0)
@@ -2394,8 +2413,8 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                 parsed_direct_df = None
                                 for enc in ["utf-8-sig", "utf-8", "cp932", "shift_jis"]:
                                     try:
-                                        sep = "\t" if fname_l.endswith(".tsv") else ","
-                                        temp_df = pd.read_csv(io.BytesIO(bytes_data), encoding=enc, sep=sep, dtype=str).fillna("")
+                                        sep = "\t" if fname_l.endswith(".tsv") else None
+                                        temp_df = pd.read_csv(io.BytesIO(bytes_data), encoding=enc, sep=sep, engine="python", dtype=str).fillna("")
                                         col_names = [str(c).strip() for c in temp_df.columns]
                                         if any(k in col_names for k in ["レース名", "レース", "馬名", "馬番"]):
                                             rename_map = {}
@@ -2421,9 +2440,34 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                             else:
                                 remaining_files.append(pf)
 
+                    # 2. テキストエリアへの CSV/TSV 貼り付けデータの直接パース処理
+                    memo_text_remaining = past_text_memo.strip()
+                    if memo_text_remaining:
+                        for enc in ["utf-8-sig", "utf-8"]:
+                            try:
+                                temp_df = pd.read_csv(io.StringIO(memo_text_remaining), sep=None, engine="python", dtype=str).fillna("")
+                                col_names = [str(c).strip() for c in temp_df.columns]
+                                if any(k in col_names for k in ["レース名", "レース", "馬名", "馬番"]):
+                                    rename_map = {}
+                                    for c in temp_df.columns:
+                                        c_str = str(c).strip()
+                                        if c_str == "レース":
+                                            rename_map[c] = "レース名"
+                                        elif c_str in ["着", "順位", "着順"]:
+                                            rename_map[c] = "確定着順"
+                                        elif c_str in ["単勝人気", "人気"]:
+                                            rename_map[c] = "単勝人気"
+                                    if rename_map:
+                                        temp_df = temp_df.rename(columns=rename_map)
+                                    direct_csv_dfs.append(temp_df)
+                                    memo_text_remaining = ""  # Pandasでのパース成功時はAIへ渡さない
+                                    break
+                            except Exception:
+                                pass
+
                     saved_races_list = []
 
-                    # 直接読み込みに成功した全CSVデータをレースごとに分割・個別保存
+                    # 3. Pandasで直接読み込んだ構造化データをレースごとに分割・個別保存
                     if direct_csv_dfs:
                         for c_df in direct_csv_dfs:
                             c_df = sanitize_dataframe_columns(c_df)
@@ -2433,13 +2477,13 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                             save_to_db(c_df)
                             saved_races_list.extend(c_df["レース名"].unique().tolist())
 
-                    # 画像・PDF・非CSVメモ等の場合は Gemini AI で一括抽出
-                    if remaining_files or past_text_memo.strip():
+                    # 4. 画像やPDF、非構造化メモテキストのみ Gemini AI で補足抽出
+                    if remaining_files or memo_text_remaining:
                         if not active_key:
-                            st.error("⚠️ Gemini API Key を設定してください！")
+                            st.error("⚠️ 画像/PDF/非構造化テキストの解析には Gemini API Key が必要です。")
                         else:
                             raw_json = batch_register_past_race(
-                                active_key, active_selected_rule, remaining_files, past_text_memo, selected_model
+                                active_key, active_selected_rule, remaining_files, memo_text_remaining, selected_model
                             )
                             parsed_df = parse_json_ai_output(raw_json)
                             if not parsed_df.empty:
@@ -2612,6 +2656,17 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         selected_eval_race = st.selectbox("🎯 閲覧・再評価する予想データ（レース）を選択してください：", all_races, key="eval_pool_race_select")
 
         if selected_eval_race:
+            # 🗑️ プール閲覧画面からのレース単位データ削除UI
+            with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
+                st.warning(f"⚠️ レース「{selected_eval_race}」の評価・予想データをデータベースから完全に削除します。")
+                confirm_del_eval = st.checkbox(f"本当に「{selected_eval_race}」のデータを削除しますか？", key="del_chk_eval_pool")
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_eval_pool", type="primary", disabled=not confirm_del_eval):
+                    if delete_race_from_db(selected_eval_race):
+                        st.success(f"🎉 レース「{selected_eval_race}」のデータをデータベースから正常に削除しました！")
+                        st.rerun()
+                    else:
+                        st.error("❌ 削除処理に失敗しました。")
+
             matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
             render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
 
@@ -2633,6 +2688,17 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         selected_recap_race = st.selectbox("🏁 閲覧する回顧データ（レース）を選択してください：", all_races, key="recap_pool_race_select")
 
         if selected_recap_race:
+            # 🗑️ 回顧プール画面からのレース単位データ削除UI
+            with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
+                st.warning(f"⚠️ レース「{selected_recap_race}」の回顧・照合データをデータベースから完全に削除します。")
+                confirm_del_recap = st.checkbox(f"本当に「{selected_recap_race}」のデータを削除しますか？", key="del_chk_recap_pool")
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_recap_pool", type="primary", disabled=not confirm_del_recap):
+                    if delete_race_from_db(selected_recap_race):
+                        st.success(f"🎉 レース「{selected_recap_race}」のデータをデータベースから正常に削除しました！")
+                        st.rerun()
+                    else:
+                        st.error("❌ 削除処理に失敗しました。")
+
             race_df = db_df[db_df["レース名"].astype(str) == str(selected_recap_race)].copy()
             recap_text = race_df["回顧メモ"].iloc[0] if "回顧メモ" in race_df.columns and str(race_df["回顧メモ"].iloc[0]).strip() else ""
 
@@ -2665,6 +2731,18 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         race_selector_options = ["🌐 すべてのレース（全件一括表示）"] + all_races_in_db
 
         selected_db_race = st.selectbox("📂 表示・閲覧するレースを選択してください：", race_selector_options, key="db_race_filter_selectbox")
+
+        # 🗑️ 過去馬データベース画面からのレース単位データ削除UI
+        if selected_db_race != "🌐 すべてのレース（全件一括表示）":
+            with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
+                st.warning(f"⚠️ レース「{selected_db_race}」の出走馬・成績データを過去馬データベースから完全に削除します。")
+                confirm_del_db = st.checkbox(f"本当に「{selected_db_race}」のデータを削除しますか？", key="del_chk_db_pool")
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_db_pool", type="primary", disabled=not confirm_del_db):
+                    if delete_race_from_db(selected_db_race):
+                        st.success(f"🎉 レース「{selected_db_race}」のデータを過去馬データベースから正常に削除しました！")
+                        st.rerun()
+                    else:
+                        st.error("❌ 削除処理に失敗しました。")
 
         disp_db_df = sanitize_dataframe_columns(db_df.copy().fillna(""))
         disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
