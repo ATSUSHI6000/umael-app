@@ -35,7 +35,7 @@ DRAFTS_DIR = "race_drafts"
 # --------------------------------------------------
 
 def apply_top3_highlight(df):
-    """1着・2着・3着の行にカラーリング（1着:薄赤、2着:薄青、3着:薄緑）を適用する関数"""
+    """1着・2着・3着の行にカラーリング（指定デザインコード）を適用する関数"""
     if df is None or df.empty:
         return df
 
@@ -58,11 +58,11 @@ def apply_top3_highlight(df):
             try:
                 rank = int(s)
                 if rank == 1:
-                    return ['background-color: #ffe6e6; color: #990000; font-weight: bold;'] * len(row)  # 1着: 薄赤/赤字
+                    return ['background-color: #4a3b00; color: #ffd700; font-weight: bold;'] * len(row)  # 1着: ゴールド/金字
                 elif rank == 2:
-                    return ['background-color: #e6f2ff; color: #004085; font-weight: bold;'] * len(row)  # 2着: 薄青/青字
+                    return ['background-color: #223344; color: #00ffff; font-weight: bold;'] * len(row)  # 2着: シアン/水色字
                 elif rank == 3:
-                    return ['background-color: #e2f0d9; color: #276a3c; font-weight: bold;'] * len(row)  # 3着: 薄緑/緑字
+                    return ['background-color: #332211; color: #ffaa55; font-weight: bold;'] * len(row)  # 3着: ブロンズ/橙字
             except ValueError:
                 pass
         return [''] * len(row)
@@ -2510,7 +2510,6 @@ elif selected_menu == "🔄 回顧・精度検証":
                         update_db_with_recap(selected_race, res_df, memo_part)
                         st.success(f"🎉 レース「{selected_race}」の回顧・照合結果を年度別データベースに保存しました！")
                         
-                        # ★ 1着(薄赤)・2着(薄青)・3着(薄緑) のカラーリングを適用して描画
                         styled_res_df = apply_top3_highlight(res_df)
                         st.dataframe(styled_res_df, use_container_width=True, hide_index=True)
                         st.info(memo_part)
@@ -2565,7 +2564,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 
             st.markdown(f"### 🏆 【{selected_recap_race}】 全頭確定着順 ＆ 照合結果")
             
-            # ★ 1着(薄赤)・2着(薄青)・3着(薄緑) のカラーリングを適用して描画
             styled_disp_df = apply_top3_highlight(disp_result_df)
             st.dataframe(styled_disp_df, use_container_width=True, hide_index=True)
 
