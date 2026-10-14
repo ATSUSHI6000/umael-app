@@ -641,7 +641,8 @@ def render_re_evaluation_section(df, active_selected_rule, model_name):
     with st.expander("🔄 評価ルールの調整・AI再評価実行", expanded=False):
         st.write("現在のルール設定でこのレースを再解析・評価更新できます。")
         temp_rule = st.text_area("適用ルール", value=active_selected_rule, height=150)
-        if st.button("🔥 このルールで再評価を実行", type="primary"):
+        st.markdown('<div class="green-button">', unsafe_allow_html=True)
+        if st.button("🔥 このルールで再評価を実行", key="btn_re_eval"):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -664,6 +665,7 @@ def render_re_evaluation_section(df, active_selected_rule, model_name):
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ 再評価中にエラーが発生しました: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_field_mode_ui(active_key, active_selected_rule, selected_model):
@@ -678,7 +680,8 @@ def render_field_mode_ui(active_key, active_selected_rule, selected_model):
         key="field_mode_file_uploader"
     )
 
-    if st.button("🔥 厳選5Rを一括解析する", use_container_width=True, type="primary"):
+    st.markdown('<div class="green-button">', unsafe_allow_html=True)
+    if st.button("🔥 厳選5Rを一括解析する", use_container_width=True, key="btn_field_mode_run"):
         if not active_key:
             st.error("⚠️ Gemini API Key が設定されていません。")
         elif not field_files:
@@ -699,6 +702,7 @@ def render_field_mode_ui(active_key, active_selected_rule, selected_model):
                         st.dataframe(apply_top3_highlight(df), use_container_width=True, hide_index=True)
                 except Exception as e:
                     st.error(f"❌ 解析中にエラーが発生しました: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # --------------------------------------------------
@@ -1156,7 +1160,7 @@ def render_umael_chat_ui(df, race_title):
 
 
 # --------------------------------------------------
-# 🎨 デザインCSS定義（ボタンカラー青・緑・赤カスタマイズ統合修復）＆評価画面UI
+# 🎨 デザインCSS定義（HTMLコンテナ/CSSラッパー方式によるボタンカラー完全上書き修復）
 # --------------------------------------------------
 
 st.markdown(
@@ -1191,12 +1195,12 @@ st.markdown(
     }
     
     /* -------------------------------------------------- */
-    /* 🎨 各種ボタンの役割別カラー設定 (青・緑・赤) 修復 */
+    /* 🎨 HTMLコンテナ・CSSラッパー方式によるボタン個別カラー適用 */
     /* -------------------------------------------------- */
     
     /* 1. 下書き保存ボタン（青系: #1976d2 / ホバー時: #1565c0） */
-    button[aria-label*="下書き保存"],
-    button[aria-label*="下書き"] {
+    div.blue-button > button,
+    div.blue-button button {
         background-color: #1976d2 !important;
         background: #1976d2 !important;
         color: #ffffff !important;
@@ -1204,8 +1208,8 @@ st.markdown(
         font-weight: bold !important;
         box-shadow: 0 2px 5px rgba(25, 118, 210, 0.4) !important;
     }
-    button[aria-label*="下書き保存"]:hover,
-    button[aria-label*="下書き"]:hover {
+    div.blue-button > button:hover,
+    div.blue-button button:hover {
         background-color: #1565c0 !important;
         background: #1565c0 !important;
         border-color: #90caf9 !important;
@@ -1213,10 +1217,8 @@ st.markdown(
     }
 
     /* 2. 解析・分析・実行ボタン（緑系: #2e7d32 / ホバー時: #1b5e20） */
-    button[aria-label*="解析"],
-    button[aria-label*="分析"],
-    button[aria-label*="実行"],
-    button[aria-label*="再評価"] {
+    div.green-button > button,
+    div.green-button button {
         background-color: #2e7d32 !important;
         background: #2e7d32 !important;
         color: #ffffff !important;
@@ -1224,10 +1226,8 @@ st.markdown(
         font-weight: bold !important;
         box-shadow: 0 2px 5px rgba(46, 125, 50, 0.4) !important;
     }
-    button[aria-label*="解析"]:hover,
-    button[aria-label*="分析"]:hover,
-    button[aria-label*="実行"]:hover,
-    button[aria-label*="再評価"]:hover {
+    div.green-button > button:hover,
+    div.green-button button:hover {
         background-color: #1b5e20 !important;
         background: #1b5e20 !important;
         border-color: #a5d6a7 !important;
@@ -1235,8 +1235,8 @@ st.markdown(
     }
 
     /* 3. 削除・消去ボタン（赤系: #d32f2f / ホバー時: #c62828） */
-    button[aria-label*="削除"],
-    button[aria-label*="消去"] {
+    div.red-button > button,
+    div.red-button button {
         background-color: #d32f2f !important;
         background: #d32f2f !important;
         color: #ffffff !important;
@@ -1244,8 +1244,8 @@ st.markdown(
         font-weight: bold !important;
         box-shadow: 0 2px 5px rgba(211, 47, 47, 0.4) !important;
     }
-    button[aria-label*="削除"]:hover,
-    button[aria-label*="消去"]:hover {
+    div.red-button > button:hover,
+    div.red-button button:hover {
         background-color: #c62828 !important;
         background: #c62828 !important;
         border-color: #ef9a9a !important;
@@ -2047,6 +2047,7 @@ if selected_menu == "📋 レース分析・予想":
         btn_col1, btn_col2, btn_col3 = st.columns([1.2, 1.5, 1])
 
         with btn_col1:
+            st.markdown('<div class="blue-button">', unsafe_allow_html=True)
             if st.button("💾 今回のデータを下書き保存する", use_container_width=True):
                 if (
                     not files_group1 and not files_group2 and not files_group3
@@ -2077,9 +2078,11 @@ if selected_menu == "📋 レース分析・予想":
                         except Exception as e:
                             st.session_state["draft_toast_msg"] = ("error", f"❌ 保存中にエラーが発生しました: {e}")
                             st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with btn_col2:
-            if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True, type="primary"):
+            st.markdown('<div class="green-button">', unsafe_allow_html=True)
+            if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True):
                 active_key = load_api_key()
                 if not active_key:
                     st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2125,17 +2128,21 @@ if selected_menu == "📋 レース分析・予想":
                                     st.rerun()
                             except Exception as e:
                                 st.error(f"❌ 解析中にエラーが発生しました: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with btn_col3:
+            st.markdown('<div class="red-button">', unsafe_allow_html=True)
             if st.button("🗑️ この下書きを削除", use_container_width=True):
                 if draft_race_name and draft_choice != "✨ 【新規レースとして保存（馬柱からレース名自動判定）】":
                     delete_draft(draft_race_name)
                     st.session_state.pop("selected_draft_race", None)
                     st.session_state["draft_toast_msg"] = ("success", f"🗑️ 下書きデータ「{draft_race_name}」を削除しました！")
                     st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     else:
-        if st.button("🔥 AI分析を実行する", use_container_width=True, type="primary"):
+        st.markdown('<div class="green-button">', unsafe_allow_html=True)
+        if st.button("🔥 AI分析を実行する", use_container_width=True):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2164,6 +2171,7 @@ if selected_menu == "📋 レース分析・予想":
                             st.rerun()
                     except Exception as e:
                         st.error(f"❌ 解析中にエラーが発生しました: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
         st.divider()
@@ -2205,7 +2213,8 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
             key="past_batch_memo"
         )
 
-    if st.button("🚀 過去レースを一括解析して2026年データベースへ保存登録", use_container_width=True, type="primary"):
+    st.markdown('<div class="green-button">', unsafe_allow_html=True)
+    if st.button("🚀 過去レースを一括解析して2026年データベースへ保存登録", use_container_width=True):
         active_key = load_api_key()
         if not past_files and not past_text_memo.strip():
             st.warning("⚠️ 過去データファイルまたはメモを入力してください！")
@@ -2329,6 +2338,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
 
                 except Exception as e:
                     st.error(f"❌ 一括登録中にエラーが発生しました: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
@@ -2426,7 +2436,8 @@ elif selected_menu == "🔄 回顧・精度検証":
                 key="recap_multi_file_uploader",
             )
 
-        if st.button("🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True, type="primary"):
+        st.markdown('<div class="green-button">', unsafe_allow_html=True)
+        if st.button("🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2496,6 +2507,7 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                     except Exception as e:
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # --------------------------------------------------
@@ -2521,12 +2533,14 @@ elif selected_menu == "📊 評価データ一覧（プール）":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_eval_race}」の評価・予想データをデータベースから完全に削除します。")
                 confirm_del_eval = st.checkbox(f"本当に「{selected_eval_race}」のデータを削除しますか？", key="del_chk_eval_pool")
-                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_eval_pool", type="primary", disabled=not confirm_del_eval):
+                st.markdown('<div class="red-button">', unsafe_allow_html=True)
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_eval_pool", disabled=not confirm_del_eval):
                     if delete_race_from_db(selected_eval_race):
                         st.success(f"🎉 レース「{selected_eval_race}」のデータをデータベースから正常に削除しました！")
                         st.rerun()
                     else:
                         st.error("❌ 削除処理に失敗しました。")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             matched_df = db_df[db_df["レース名"].astype(str).str.strip() == str(selected_eval_race).strip()].copy()
             render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
@@ -2557,12 +2571,14 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_recap_race}」の回顧・照合データをデータベースから完全に削除します。")
                 confirm_del_recap = st.checkbox(f"本当に「{selected_recap_race}」のデータを削除しますか？", key="del_chk_recap_pool")
-                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_recap_pool", type="primary", disabled=not confirm_del_recap):
+                st.markdown('<div class="red-button">', unsafe_allow_html=True)
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_recap_pool", disabled=not confirm_del_recap):
                     if delete_race_from_db(selected_recap_race):
                         st.success(f"🎉 レース「{selected_recap_race}」のデータをデータベースから正常に削除しました！")
                         st.rerun()
                     else:
                         st.error("❌ 削除処理に失敗しました。")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             race_df = db_df[db_df["レース名"].astype(str).str.strip() == str(selected_recap_race).strip()].copy()
             recap_text = race_df["回顧メモ"].iloc[0] if "回顧メモ" in race_df.columns and str(race_df["回顧メモ"].iloc[0]).strip() else ""
@@ -2613,12 +2629,14 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             with st.expander("🗑️ 選択中のレースデータの削除", expanded=False):
                 st.warning(f"⚠️ レース「{selected_db_race}」の出走馬・成績データを過去馬データベースから完全に削除します。")
                 confirm_del_db = st.checkbox(f"本当に「{selected_db_race}」のデータを削除しますか？", key="del_chk_db_pool")
-                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_db_pool", type="primary", disabled=not confirm_del_db):
+                st.markdown('<div class="red-button">', unsafe_allow_html=True)
+                if st.button("🗑️ 選択中のレースデータを削除", key="del_btn_db_pool", disabled=not confirm_del_db):
                     if delete_race_from_db(selected_db_race):
                         st.success(f"🎉 レース「{selected_db_race}」のデータを過去馬データベースから正常に削除しました！")
                         st.rerun()
                     else:
                         st.error("❌ 削除処理に失敗しました。")
+                st.markdown('</div>', unsafe_allow_html=True)
 
         disp_db_df = sanitize_dataframe_columns(db_df.copy().fillna(""))
         disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気", "年度"], errors="ignore")
