@@ -1156,7 +1156,7 @@ def render_umael_chat_ui(df, race_title):
 
 
 # --------------------------------------------------
-# 🎨 デザインCSS定義（ボタンカラー青・緑・赤カスタマイズ統合）＆評価画面UI
+# 🎨 デザインCSS定義（ボタンカラー青・緑・赤カスタマイズ統合修復）＆評価画面UI
 # --------------------------------------------------
 
 st.markdown(
@@ -1191,56 +1191,65 @@ st.markdown(
     }
     
     /* -------------------------------------------------- */
-    /* 🎨 各種ボタンの役割別カラー設定 (青・緑・赤) */
+    /* 🎨 各種ボタンの役割別カラー設定 (青・緑・赤) 修復 */
     /* -------------------------------------------------- */
     
-    /* 1. 青色ボタン（Primary: AI解析・一括実行・メイン操作） */
-    button[data-testid="stBaseButton-primary"] {
-        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+    /* 1. 下書き保存ボタン（青系: #1976d2 / ホバー時: #1565c0） */
+    button[aria-label*="下書き保存"],
+    button[aria-label*="下書き"] {
+        background-color: #1976d2 !important;
+        background: #1976d2 !important;
         color: #ffffff !important;
-        border: 1px solid #38bdf8 !important;
+        border: 1px solid #42a5f5 !important;
         font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(2, 132, 199, 0.4) !important;
+        box-shadow: 0 2px 5px rgba(25, 118, 210, 0.4) !important;
     }
-    button[data-testid="stBaseButton-primary"]:hover {
-        background: linear-gradient(135deg, #0369a1 0%, #075985 100%) !important;
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.7) !important;
+    button[aria-label*="下書き保存"]:hover,
+    button[aria-label*="下書き"]:hover {
+        background-color: #1565c0 !important;
+        background: #1565c0 !important;
+        border-color: #90caf9 !important;
+        box-shadow: 0 0 12px rgba(66, 165, 245, 0.7) !important;
     }
 
-    /* 2. 緑色ボタン（保存・更新・登録・ダウンロード） */
-    button:has(p:contains("保存")),
-    button:has(p:contains("更新")),
-    button:has(p:contains("登録")),
-    button:has(p:contains("ダウンロード")) {
-        background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important;
+    /* 2. 解析・分析・実行ボタン（緑系: #2e7d32 / ホバー時: #1b5e20） */
+    button[aria-label*="解析"],
+    button[aria-label*="分析"],
+    button[aria-label*="実行"],
+    button[aria-label*="再評価"] {
+        background-color: #2e7d32 !important;
+        background: #2e7d32 !important;
         color: #ffffff !important;
-        border: 1px solid #4ade80 !important;
+        border: 1px solid #66bb6a !important;
         font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(22, 128, 61, 0.4) !important;
+        box-shadow: 0 2px 5px rgba(46, 125, 50, 0.4) !important;
     }
-    button:has(p:contains("保存")):hover,
-    button:has(p:contains("更新")):hover,
-    button:has(p:contains("登録")):hover,
-    button:has(p:contains("ダウンロード")):hover {
-        background: linear-gradient(135deg, #166534 0%, #14532d 100%) !important;
-        box-shadow: 0 0 12px rgba(74, 222, 128, 0.7) !important;
+    button[aria-label*="解析"]:hover,
+    button[aria-label*="分析"]:hover,
+    button[aria-label*="実行"]:hover,
+    button[aria-label*="再評価"]:hover {
+        background-color: #1b5e20 !important;
+        background: #1b5e20 !important;
+        border-color: #a5d6a7 !important;
+        box-shadow: 0 0 12px rgba(102, 187, 106, 0.7) !important;
     }
 
-    /* 3. 赤色ボタン（削除・デンジャー系） */
-    button:has(p:contains("削除")),
-    button:has(p:contains("消去")),
-    button[data-testid="stBaseButton-primary"]:has(p:contains("削除")) {
-        background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%) !important;
+    /* 3. 削除・消去ボタン（赤系: #d32f2f / ホバー時: #c62828） */
+    button[aria-label*="削除"],
+    button[aria-label*="消去"] {
+        background-color: #d32f2f !important;
+        background: #d32f2f !important;
         color: #ffffff !important;
-        border: 1px solid #f87171 !important;
+        border: 1px solid #ef5350 !important;
         font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(185, 28, 28, 0.4) !important;
+        box-shadow: 0 2px 5px rgba(211, 47, 47, 0.4) !important;
     }
-    button:has(p:contains("削除")):hover,
-    button:has(p:contains("消去")):hover,
-    button[data-testid="stBaseButton-primary"]:has(p:contains("削除")):hover {
-        background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%) !important;
-        box-shadow: 0 0 12px rgba(248, 113, 113, 0.7) !important;
+    button[aria-label*="削除"]:hover,
+    button[aria-label*="消去"]:hover {
+        background-color: #c62828 !important;
+        background: #c62828 !important;
+        border-color: #ef9a9a !important;
+        box-shadow: 0 0 12px rgba(239, 83, 80, 0.7) !important;
     }
     
     /* 波乱度判定カード */
