@@ -658,7 +658,7 @@ def sanitize_dataframe_columns(df):
 
 
 def migrate_existing_data_to_2026():
-    """ルートディレクトリや旧保存先のデータ（72件等）を自動検出し、data/2026/umael_database.csvへ自動移行"""
+    """ルートディレクトリや旧保存先のデータ（107件等）を自動検出し、data/2026/umael_database.csvへ自動移行"""
     year_2026_dir = os.path.join(DATA_DIR, "2026")
     os.makedirs(year_2026_dir, exist_ok=True)
     year_2026_file = os.path.join(year_2026_dir, DB_FILE)
@@ -691,12 +691,10 @@ def migrate_existing_data_to_2026():
 
 def load_db(selected_year="2026年"):
     """2026年標準年度管理（data/2026/umael_database.csv）ロード関数（自動移行付き）"""
-    # 起動・ロード時に自動データ移行を実施
     migrate_existing_data_to_2026()
 
     all_dfs = []
 
-    # メインルートDB読み込み
     if os.path.exists(DB_FILE):
         try:
             m_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -704,7 +702,6 @@ def load_db(selected_year="2026年"):
         except Exception:
             pass
 
-    # 2026年用フォルダ（data/2026/umael_database.csv）読み込み
     year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
     if os.path.exists(year_2026_file):
         try:
@@ -713,7 +710,6 @@ def load_db(selected_year="2026年"):
         except Exception:
             pass
 
-    # その他存在する年度別フォルダも一応保持読み込み
     if os.path.exists(DATA_DIR):
         for entry in os.listdir(DATA_DIR):
             y_dir = os.path.join(DATA_DIR, entry)
@@ -751,7 +747,6 @@ def load_db(selected_year="2026年"):
     elif "年度" not in combined.columns:
         combined["年度"] = "2026"
 
-    # 年度フィルター処理（2026年標準）
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
         combined = combined[combined["年度"].astype(str) == target_y].reset_index(drop=True)
@@ -1662,7 +1657,7 @@ def save_to_db(new_df):
         if race_sub_df.empty:
             continue
 
-        target_year = "2026"  # 年度は2026年ベースに一本化
+        target_year = "2026"
 
         # 1. ルート DB 保存
         if os.path.exists(DB_FILE):
@@ -1745,7 +1740,7 @@ def update_db_with_recap(race_name, result_df, memo_text):
 
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-        # 2026年フォルダへも確実に反省保存
+        # 2026年フォルダへも反省保存
         year_db_path = os.path.join(DATA_DIR, "2026", DB_FILE)
         os.makedirs(os.path.join(DATA_DIR, "2026"), exist_ok=True)
         df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
@@ -1755,7 +1750,7 @@ def update_db_with_recap(race_name, result_df, memo_text):
 
 
 def delete_race_from_db(race_name):
-    """ルートおよび data/2026/umael_database.csv （全年度フォルダ）から指定レースの行を完全一括削除"""
+    """ルートおよび data/2026/umael_database.csv から指定レースの行を完全一括削除"""
     if not race_name or not str(race_name).strip():
         return False
     
@@ -2404,7 +2399,7 @@ if selected_menu == "📋 レース分析・予想":
 
 elif selected_menu == "📜 過去レース評価・結果・回顧（一括登録）":
     st.subheader("📜 過去レース評価・結果・回顧（一括登録）")
-    st.caption("過去の重賞やデータ（CSV、テキスト、PDF、画像）から、予想評価・確定結果・回顧を一括生成して2026年データベースへ蓄積します。複数レース連結CSVはPandasで直接高速パースし一括保存！")
+    st.caption("全107レース等が縦連結されたCSV（『競馬分析用シート_2026.csv』等）をPandasで直接パースし、見解・回顧テキストを含めて `data/2026/` へ一括保存登録します！")
 
     rule_type = st.radio(
         "適用する評価ルールを選択：",
@@ -2442,12 +2437,12 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
         if not past_files and not past_text_memo.strip():
             st.warning("⚠️ 過去データファイルまたはメモを入力してください！")
         else:
-            with st.spinner("🏇 過去データから「全レース評価＋結果＋回顧」を一括抽出・個別保存中..."):
+            with st.spinner("🏇 過去データから「全107レース評価・見解・結果・回顧」を一括抽出・個別保存中..."):
                 try:
                     direct_csv_dfs = []
                     remaining_files = []
 
-                    # 1. アップロードされた CSV / TSV / TXT ファイルの Pandas 直接パース処理（Gemini API不使用）
+                    # 1. アップロードされた CSV / TSV / TXT ファイルの Pandas 直接パース処理（AI不使用）
                     if past_files:
                         for pf in past_files:
                             pf.seek(0)
@@ -2470,6 +2465,10 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                                     rename_map[c] = "確定着順"
                                                 elif c_str in ["単勝人気", "人気"]:
                                                     rename_map[c] = "単勝人気"
+                                                elif c_str in ["見解", "コメント", "短評"]:
+                                                    rename_map[c] = "メモ"
+                                                elif c_str in ["回顧", "総評"]:
+                                                    rename_map[c] = "回顧メモ"
                                             if rename_map:
                                                 temp_df = temp_df.rename(columns=rename_map)
                                             parsed_direct_df = temp_df
@@ -2501,6 +2500,10 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
                                             rename_map[c] = "確定着順"
                                         elif c_str in ["単勝人気", "人気"]:
                                             rename_map[c] = "単勝人気"
+                                        elif c_str in ["見解", "コメント", "短評"]:
+                                            rename_map[c] = "メモ"
+                                        elif c_str in ["回顧", "総評"]:
+                                            rename_map[c] = "回顧メモ"
                                     if rename_map:
                                         temp_df = temp_df.rename(columns=rename_map)
                                     direct_csv_dfs.append(temp_df)
@@ -2511,13 +2514,35 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
 
                     saved_races_list = []
 
-                    # 3. Pandasで直接読み込んだ構造化データをレースごとに分割・2026年フォルダへ個別保存
+                    # 3. Pandasで直接読み込んだ構造化データをレースごとに分割・回顧テキスト集約・2026年フォルダへ一括保存
                     if direct_csv_dfs:
                         for c_df in direct_csv_dfs:
                             c_df = sanitize_dataframe_columns(c_df)
                             if "レース名" not in c_df.columns or c_df["レース名"].dropna().empty:
                                 c_df["レース名"] = "20261008_過去一括登録レース_OP"
                             c_df["年度"] = "2026"
+
+                            if "回顧メモ" not in c_df.columns:
+                                c_df["回顧メモ"] = ""
+
+                            # レースごとに各馬の「メモ」を集約して「回顧メモ」を自動構築・補完
+                            for r_name, group in c_df.groupby("レース名"):
+                                recap_list = []
+                                for _, r_row in group.iterrows():
+                                    h_no = r_row.get("馬番", "")
+                                    h_nm = r_row.get("馬名", "")
+                                    h_memo = str(r_row.get("メモ", "")).strip()
+                                    h_rank = r_row.get("確定着順", "")
+                                    if h_memo:
+                                        rank_str = f"[{h_rank}着] " if h_rank else ""
+                                        recap_list.append(f"・{rank_str}【{h_no}】{h_nm}: {h_memo}")
+                                
+                                if recap_list:
+                                    generated_recap = "📌 【レース回顧・各馬勝因敗因分析】\n" + "\n".join(recap_list)
+                                    c_df.loc[c_df["レース名"] == r_name, "回顧メモ"] = c_df.loc[c_df["レース名"] == r_name, "回顧メモ"].apply(
+                                        lambda x: str(x).strip() if str(x).strip() else generated_recap
+                                    )
+
                             save_to_db(c_df)
                             saved_races_list.extend(c_df["レース名"].unique().tolist())
 
@@ -2541,7 +2566,7 @@ elif selected_menu == "📜 過去レース評価・結果・回顧（一括登�
 
                     if saved_races_list:
                         unique_saved = list(set(saved_races_list))
-                        st.success(f"🎉 計 {len(unique_saved)} レースの過去データ（{', '.join(unique_saved[:5])}{'等' if len(unique_saved)>5 else ''}）を取り込み、2026年プールに保存登録しました！")
+                        st.success(f"🎉 計 {len(unique_saved)} レースの過去データ（{', '.join(unique_saved[:5])}{'等' if len(unique_saved)>5 else ''}）を取り込み、2026年プールへ保存登録しました！")
                         st.rerun()
                     else:
                         st.error("❌ データのパース・取り込みに失敗しました。ファイル内容をご確認ください。")
