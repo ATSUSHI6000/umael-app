@@ -29,10 +29,34 @@ RULE_HOKKAIDO_FILE = "saved_rules_hokkaido.txt"
 API_KEY_FILE = "api_key.txt"
 DRAFTS_DIR = "race_drafts"
 
+# デフォルトルールテキスト定義
+DEFAULT_G1_RULES = """【G1専用・評価表出力ルール】"""
+DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール】"""
+DEFAULT_HOKKAIDO_RULES = """【北海道・洋芝専用 評価表出力ルール】"""
+
 
 # --------------------------------------------------
-# 🛠 共通ヘルパー関数・クレンジング定義・カラーリング関数
+# 🛠 共通ヘルパー関数・ルール読み込み・クレンジング定義
 # --------------------------------------------------
+
+def load_saved_rules(file_path, default_text):
+    """保存されているルールテキストファイルを安定読み込みする関数"""
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                if content.strip():
+                    return content
+        except Exception:
+            return default_text
+    return default_text
+
+
+def save_rules_to_file(file_path, rule_text):
+    """ルールテキストをファイルへ保存する関数"""
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(rule_text)
+
 
 def apply_top3_highlight(df):
     """1着・2着・3着の行にカラーリングを適用する関数"""
@@ -600,11 +624,6 @@ def convert_to_circled_numbers(text):
     return re.sub(r"\b(20|1[0-9]|[1-9])\b", replacer, str(text))
 
 
-DEFAULT_G1_RULES = """【G1専用・評価表出力ルール】"""
-DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール】"""
-DEFAULT_HOKKAIDO_RULES = """【北海道・洋芝専用 評価表出力ルール】"""
-
-
 def safe_int(val, default=0):
     try:
         if isinstance(val, (pd.Series, list)):
@@ -616,10 +635,6 @@ def safe_int(val, default=0):
     except Exception:
         return default
 
-
-# --------------------------------------------------
-# 🛠 補完追加: 未定義エラー解消用関数 (2件)
-# --------------------------------------------------
 
 def render_re_evaluation_section(df, active_selected_rule, model_name):
     """評価結果画面内の AI再評価実行セクション"""
@@ -756,7 +771,6 @@ def sanitize_dataframe_columns(df):
         score = safe_int(row.get("総合スコア", 0))
         current_eval = str(row.get("評価", "")).strip()
 
-        # 評価が空欄なら総合スコアから算出
         if not current_eval or current_eval in ["-", "nan", "None"]:
             if score >= 93:
                 current_eval = "S"
@@ -778,7 +792,6 @@ def sanitize_dataframe_columns(df):
 
         memo = str(row.get("メモ", "")).strip()
 
-        # 4つの印がすべて空欄の場合に自動補完
         if not (jiku or himo or chu or kiri):
             if "【推奨】" in memo or "【軸】" in memo:
                 jiku = "〇"
@@ -1143,7 +1156,7 @@ def render_umael_chat_ui(df, race_title):
 
 
 # --------------------------------------------------
-# 🎨 デザインCSS定義＆評価画面UI（理想画面完全再現版）
+# 🎨 デザインCSS定義＆評価画面UI
 # --------------------------------------------------
 
 st.markdown(
@@ -1538,23 +1551,7 @@ if mode_param == "share" and race_param:
     st.stop()
 
 
-def load_saved_rules(file_path, default_text):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                if content.strip():
-                    return content
-        except Exception:
-            return default_text
-    return default_text
-
-
-def save_rules_to_file(file_path, rule_text):
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(rule_text)
-
-
+# セッションステート初期化（ルール読込の安定化）
 if "g1_text_val" not in st.session_state:
     st.session_state["g1_text_val"] = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
 
@@ -1861,6 +1858,7 @@ if selected_menu == "📋 レース分析・予想":
         horizontal=True,
     )
 
+    # ルールテキストの動的安定読込
     if "G1専用" in rule_type:
         active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
         st.info("💡 現在 【 🏆 G1専用ルール 】 が選択されています。")
@@ -2019,7 +2017,8 @@ if selected_menu == "📋 レース分析・予想":
                             st.rerun()
 
         with btn_col2:
-            if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True):
+            # ★ 1. 解析ボタンのプライマリカラー化（オレンジ色復元）
+            if st.button("🔥 蓄積された全データでAI一括解析を実行", use_container_width=True, type="primary"):
                 active_key = load_api_key()
                 if not active_key:
                     st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2075,7 +2074,8 @@ if selected_menu == "📋 レース分析・予想":
                     st.rerun()
 
     else:
-        if st.button("🔥 AI分析を実行する", use_container_width=True):
+        # ★ 1. 解析ボタンのプライマリカラー化（オレンジ色復元）
+        if st.button("🔥 AI分析を実行する", use_container_width=True, type="primary"):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2338,7 +2338,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                 key="recap_multi_file_uploader",
             )
 
-        if st.button("🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True):
+        if st.button("🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True, type="primary"):
             active_key = load_api_key()
             if not active_key:
                 st.error("⚠️ Gemini API Key が設定されていません。")
@@ -2396,7 +2396,16 @@ elif selected_menu == "🔄 回顧・精度検証":
                         
                         styled_res_df = apply_top3_highlight(res_df)
                         st.dataframe(styled_res_df, use_container_width=True, hide_index=True)
-                        st.info(memo_part)
+                        
+                        # ★ 2. 回顧メモ（見解）ネイビーカード表示
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #0c1424; border: 2px solid #2563eb; border-radius: 10px; padding: 18px; margin-top: 15px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 0.98rem; box-shadow: 0 0 15px rgba(37, 99, 235, 0.25);">
+{memo_part}
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
                     except Exception as e:
                         st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
@@ -2467,8 +2476,16 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             styled_disp_df = apply_top3_highlight(disp_result_df)
             st.dataframe(styled_disp_df, use_container_width=True, hide_index=True)
 
+            # ★ 2. 回顧メモ（見解）ネイビーカード表示
             if recap_text:
-                st.markdown(f"<div class='recap-box'>{recap_text}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div style="background-color: #0c1424; border: 2px solid #2563eb; border-radius: 10px; padding: 18px; margin-top: 15px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 0.98rem; box-shadow: 0 0 15px rgba(37, 99, 235, 0.25);">
+{recap_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 # --------------------------------------------------
