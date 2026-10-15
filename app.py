@@ -3262,18 +3262,23 @@ elif selected_menu == "📊 評価データ一覧（プール）":
     else:
         all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
 
+        eval_race_options = ["--- 🎯 レースを選択してください ---"] + all_races
+
         selected_eval_race = st.selectbox(
             "🎯 閲覧・再評価する予想データ（レース）を選択してください：",
-            all_races,
+            eval_race_options,
+            index=0,
             key="eval_pool_race_select"
         )
 
-        if selected_eval_race:
+        if selected_eval_race and selected_eval_race != "--- 🎯 レースを選択してください ---":
             matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
             if not matched_df.empty:
                 render_race_evaluation_view(matched_df, is_viewer_mode=False, show_chat=True)
             else:
                 st.error(f"⚠️ 選択されたレース「{selected_eval_race}」のデータが見つかりませんでした。")
+        else:
+            st.info("👆 上のドロップダウンから閲覧・表示したいレースを選択してください。")
 
 
 # --------------------------------------------------
@@ -3310,13 +3315,16 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             st.success(f"📦 回顧・検証済みレース: 全 {len(recap_races)} 件")
             target_race_options = recap_races + [r for r in all_races if r not in recap_races]
 
+        recap_race_options = ["--- 🎯 レースを選択してください ---"] + target_race_options
+
         selected_recap_race = st.selectbox(
             "🏁 閲覧する回顧データ（レース）を選択してください：",
-            target_race_options,
+            recap_race_options,
+            index=0,
             key="recap_pool_race_select"
         )
 
-        if selected_recap_race:
+        if selected_recap_race and selected_recap_race != "--- 🎯 レースを選択してください ---":
             race_df = db_df[db_df["レース名"].astype(str) == str(selected_recap_race)].copy()
 
             recap_text = ""
@@ -3373,6 +3381,8 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 )
             else:
                 st.info("ℹ️ このレースにはまだプロ回顧コメントレポートが入力されていません。")
+        else:
+            st.info("👆 上のドロップダウンから閲覧したい回顧レースを選択してください。")
 
 
 # --------------------------------------------------
