@@ -31,10 +31,10 @@ DRAFTS_DIR = "race_drafts"
 
 # デフォルトルールテキスト定義
 DEFAULT_G1_RULES = """【G1専用・評価表出力ルール（ver.8.3・レース質＆展開予想冒頭配置・頂点実績厳格化・開幕外枠デバフ・鉄砲個別判定・傷病デバフ・タフ馬場補正・単騎逃げ救済・直感相馬眼・YouTubeハイブリッド解析統合版）】
-================================================================
+========================================
 【G1専用 競馬予想評価ロジック＆運用仕様書 ver.8.3（完全統合マスター版）】
 改訂日：2026年10月8日（Web解析サイト蓄積・Webアプリ完全適合版）
-================================================================
+========================================
 ■ 0. システム運用・誤入力完全排除規定
 ・ブラウジング完全禁止、ファクトチェック厳格化。
 ■ 1. 基本方針・評価スタンス
@@ -53,10 +53,10 @@ DEFAULT_G1_RULES = """【G1専用・評価表出力ルール（ver.8.3・レー�
 """
 
 DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール（ver.8.3・S評価厳格化＆開幕外枠デバフ・鉄砲個別判定・過重ハンデ地力救済・タフ馬場ノメりデバフ・単騎逃げ救済・直感相馬眼・軸飛び防止・前走度外視完全統合版）】
-================================================================
+========================================
 【平場・G2・G3専用 競馬予想評価ロジック＆運用仕様書 ver.8.3（完全統合マスター版）】
 改訂日：2026年10月8日（Web解析サイト蓄積・Webアプリ完全適合版）
-================================================================
+========================================
 ■ 0. システム運用・誤入力完全排除規定
 ■ 1. 基本方針・評価スタンス
 ■ 2. 評価ランク定義とS評価認定必須要件
@@ -72,10 +72,10 @@ DEFAULT_GENERAL_RULES = """【平場・G2・G3専用 評価表出力ルール（
 """
 
 DEFAULT_HOKKAIDO_RULES = """【平場・G2・G3 北海道・洋芝（函館・札幌）専用 評価表出力ルール（ver.8.3・S評価厳格化＆開幕外枠デバフ・鉄砲個別判定・過重ハンデ地力救済・タフ馬場ノメりデバフ・洋芝滞在・単騎逃げ救済・直感相馬眼・軸飛び防止・前走度外視完全統合版）】
-================================================================
+========================================
 【平場・G2・G3 北海道・洋芝（函館・札幌）専用 競馬予想評価ロジック＆運用仕様書 ver.8.3（完全統合マスター版）】
 改訂日：2026年10月8日（Web解析サイト蓄積・Webアプリ完全適合版）
-================================================================
+========================================
 ■ 0. システム運用・誤入力完全排除規定
 ■ 1. 基本方針・洋芝評価スタンス（洋芝滞在・パワー血統・クッション値評価）
 ■ 2. 評価ランク定義
@@ -439,7 +439,7 @@ def detect_simple_race_name(files_g1, files_g2, files_g3, files_g4=None):
     return f"準備中レース_{timestamp}"
 
 
-def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text, files_g4=None):
+def save_draft_data(race_name, files_g1, files_g2, files_g3, files_g4, urls_text):
     ensure_drafts_dir()
     if not race_name or not race_name.strip():
         race_name = detect_simple_race_name(files_g1, files_g2, files_g3, files_g4)
@@ -470,9 +470,7 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text, files_g4
     saved_count = 0
     timestamp = int(time.time())
     
-    group_tuples = [(1, files_g1), (2, files_g2), (3, files_g3)]
-    if files_g4:
-        group_tuples.append((4, files_g4))
+    group_tuples = [(1, files_g1), (2, files_g2), (3, files_g3), (4, files_g4)]
 
     for g_idx, file_list in group_tuples:
         if file_list:
@@ -490,17 +488,18 @@ def save_draft_data(race_name, files_g1, files_g2, files_g3, urls_text, files_g4
 def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
     ensure_drafts_dir()
     if not race_name or not race_name.strip():
-        return "", [], "", [], "", [], "", []
+        return "", [], "", [], "", [], "", [], "", []
 
     sanitized_name = re.sub(r'[\\/*?:"<>|]', "_", race_name.strip()).strip('_')
     race_dir = os.path.join(DRAFTS_DIR, sanitized_name)
 
     if not os.path.exists(race_dir):
-        return "", [], "", [], "", [], "", []
+        return "", [], "", [], "", [], "", [], "", []
 
     t1_all, p1_all = "", []
     t2_all, p2_all = "", []
     t3_all, p3_all = "", []
+    t4_all, p4_all = "", []
     file_names = []
 
     for fname in sorted(os.listdir(race_dir)):
@@ -524,6 +523,8 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
                 group_idx = 2
             elif fname.startswith("g3_") or fname.startswith("g3___"):
                 group_idx = 3
+            elif fname.startswith("g4_") or fname.startswith("g4___"):
+                group_idx = 4
 
             txt_content = ""
             media_parts = []
@@ -585,16 +586,19 @@ def load_draft_data(race_name, pdf_page_option="1ページ目のみ"):
             elif group_idx == 3:
                 t3_all += txt_content + "\n"
                 p3_all.extend(media_parts)
+            elif group_idx == 4:
+                t4_all += txt_content + "\n"
+                p4_all.extend(media_parts)
 
-    t4_all = ""
+    t5_all = ""
     url_log_path = os.path.join(race_dir, "urls.txt")
     if os.path.exists(url_log_path):
         with open(url_log_path, "r", encoding="utf-8") as f:
             urls_text = f.read()
             if urls_text.strip():
-                t4_all = process_multiple_urls(urls_text)
+                t5_all = process_multiple_urls(urls_text)
 
-    return t1_all, p1_all, t2_all, p2_all, t3_all, p3_all, t4_all, file_names
+    return t1_all, p1_all, t2_all, p2_all, t3_all, p3_all, t4_all, p4_all, t5_all, file_names
 
 
 def delete_draft(race_name):
@@ -1180,6 +1184,8 @@ def analyze_data_with_gemini(
     text_group3,
     parts_group3,
     text_group4,
+    parts_group4,
+    text_group5,
     model_name,
 ):
     client = genai.Client(api_key=api_key)
@@ -1228,8 +1234,11 @@ def analyze_data_with_gemini(
 === 【グループ3：前日傾向・当日の馬場情報データ】 ===
 {text_group3}
 
-=== 【グループ4：プロ予想・YouTube字幕・Web参考URL抽出データ】 ===
+=== 【グループ4：その他各種追加データ（テキスト・CSV・PDF・画像）】 ===
 {text_group4}
+
+=== 【グループ5：プロ予想・YouTube字幕・Web参考URL抽出データ】 ===
+{text_group5}
 
 【出力形式】
 以下のJSON形式のみを出力してください。
@@ -1271,6 +1280,7 @@ def analyze_data_with_gemini(
     contents_payload.extend(parts_group1)
     contents_payload.extend(parts_group2)
     contents_payload.extend(parts_group3)
+    contents_payload.extend(parts_group4)
 
     max_retries = 5
     for attempt in range(max_retries):
@@ -1516,11 +1526,11 @@ def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_nam
     media_parts_all = []
 
     for r_name in draft_races_list:
-        t1, p1, t2, p2, t3, p3, t4, _ = load_draft_data(r_name)
+        t1, p1, t2, p2, t3, p3, t4, p4, t5, _ = load_draft_data(r_name)
         combined_r_text = f"\n\n=========================================\n【対象レースデータ: {r_name}】\n=========================================\n"
-        combined_r_text += f"{t1}\n{t2}\n{t3}\n{t4}"
+        combined_r_text += f"{t1}\n{t2}\n{t3}\n{t4}\n{t5}"
         all_races_payload_text += combined_r_text
-        media_parts_all.extend(p1 + p2 + p3)
+        media_parts_all.extend(p1 + p2 + p3 + p4)
 
     selection_prompt = f"""{rules_text}
 
@@ -1922,15 +1932,12 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
         st.info("🔗 **レース名入り評価結果 専用共有URL（コピーして共有できます）:**")
         st.code(share_url, language="text")
 
-    # 直前追加データによる再評価・見解/買い目修正UIの描画
-    active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-    render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
+        # 直前追加データによる再評価・見解/買い目修正UIの描画（管理画面でのみ表示）
+        active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+        render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
-    view_tab1, view_tab2 = st.tabs(
-        ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
-    )
-
-    with view_tab1:
+    # サマリー本文描画処理
+    def render_summary_body():
         st.markdown(
             f"<h2 style='text-align: center; color: #f39c12; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
             unsafe_allow_html=True,
@@ -2093,6 +2100,19 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                         """,
                     unsafe_allow_html=True,
                 )
+
+    if is_viewer_mode:
+        # ★共有モード（ビューアー表示）の場合は買い目描画で即座にピタッと終了！チャット・詳細データ表等は完全非表示
+        render_summary_body()
+        return
+
+    # 管理・通常閲覧モード時のタブ構成
+    view_tab1, view_tab2 = st.tabs(
+        ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
+    )
+
+    with view_tab1:
+        render_summary_body()
 
     with view_tab2:
         st.subheader(f"📊 {race_title} 詳細全データ表（評価順）")
@@ -2259,7 +2279,7 @@ if mode_param == "share" and race_param:
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
         if not matched_df.empty:
-            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=False)
         else:
             st.error(f"⚠️ レース「{race_param}」の解析データは見つかりませんでした。")
     else:
@@ -2274,7 +2294,7 @@ elif "race" in query_params and not mode_param:
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(target_race_param)]
         if not matched_df.empty:
-            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=False)
         else:
             st.error(
                 f"⚠️ レース「{target_race_param}」の解析データは見つかりませんでした。"
@@ -2448,7 +2468,7 @@ if selected_menu == "📋 レース分析・予想":
                 "",
             ]:
                 st.write("📦 **選択中レースの蓄積状況**")
-                _, _, _, _, _, _, _, saved_fnames = load_draft_data(draft_race_name)
+                _, _, _, _, _, _, _, _, _, saved_fnames = load_draft_data(draft_race_name)
                 if saved_fnames:
                     st.success(f"保存済みファイル: {len(saved_fnames)}件")
                     with st.expander("保存中のファイル一覧"):
@@ -2462,7 +2482,7 @@ if selected_menu == "📋 レース分析・予想":
 
     uploader_ver = st.session_state["uploader_key_ver"]
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         files_group1 = st.file_uploader(
@@ -2494,12 +2514,20 @@ if selected_menu == "📋 レース分析・予想":
             key=f"fg3_{uploader_ver}",
         )
 
+    with col4:
+        files_group4 = st.file_uploader(
+            "4. その他各種データ (.txt / .csv / .pdf / .png / .jpg)",
+            type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=f"fg4_{uploader_ver}",
+        )
+
     st.write("")
-    urls_group4_input = st.text_area(
-        "🔗 4. プロ予想・YouTube・Web参考URL（改行して複数貼り付けOK）",
+    urls_group5_input = st.text_area(
+        "🔗 5. プロ予想・YouTube・Web参考URL（改行して複数貼り付けOK）",
         height=90,
         placeholder="https://www.youtube.com/watch?v=...\nhttps://note.com/...",
-        key=f"ug4_{uploader_ver}",
+        key=f"ug5_{uploader_ver}",
     )
 
     st.divider()
@@ -2513,7 +2541,8 @@ if selected_menu == "📋 レース分析・予想":
                     not files_group1
                     and not files_group2
                     and not files_group3
-                    and not urls_group4_input.strip()
+                    and not files_group4
+                    and not urls_group5_input.strip()
                 ):
                     st.session_state["draft_toast_msg"] = ("warning", "⚠️ 追加保存するファイルまたはURLを入力してください！")
                     st.rerun()
@@ -2526,7 +2555,8 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group1,
                                 files_group2,
                                 files_group3,
-                                urls_group4_input,
+                                files_group4,
+                                urls_group5_input,
                             )
                             st.session_state["uploader_key_ver"] += 1
                             st.session_state["selected_draft_race"] = actual_draft_name
@@ -2563,10 +2593,10 @@ if selected_menu == "📋 レース分析・予想":
                         )
                         else ""
                     )
-                    dt1, dp1, dt2, dp2, dt3, dp3, dt4, _ = (
+                    dt1, dp1, dt2, dp2, dt3, dp3, dt4, dp4, dt5, _ = (
                         load_draft_data(target_draft, pdf_page_option=pdf_opt_val)
                         if target_draft
-                        else ("", [], "", [], "", [], "", [])
+                        else ("", [], "", [], "", [], "", [], "", [])
                     )
 
                     nt1, np1 = prepare_file_parts(
@@ -2578,7 +2608,10 @@ if selected_menu == "📋 レース分析・予想":
                     nt3, np3 = prepare_file_parts(
                         files_group3, pdf_page_option=pdf_opt_val
                     )
-                    nt4 = process_multiple_urls(urls_group4_input)
+                    nt4, np4 = prepare_file_parts(
+                        files_group4, pdf_page_option=pdf_opt_val
+                    )
+                    nt5 = process_multiple_urls(urls_group5_input)
 
                     comb_t1 = dt1 + "\n" + nt1
                     comb_p1 = dp1 + np1
@@ -2587,14 +2620,18 @@ if selected_menu == "📋 レース分析・予想":
                     comb_t3 = dt3 + "\n" + nt3
                     comb_p3 = dp3 + np3
                     comb_t4 = dt4 + "\n" + nt4
+                    comb_p4 = dp4 + np4
+                    comb_t5 = dt5 + "\n" + nt5
 
                     if (
                         not comb_t1.strip()
                         and not comb_t2.strip()
                         and not comb_t3.strip()
+                        and not comb_t4.strip()
                         and not comb_p1
                         and not comb_p2
                         and not comb_p3
+                        and not comb_p4
                     ):
                         st.warning(
                             "⚠️ 解析対象のデータが見つかりません。ファイルをアップロードするか、下書きデータを保存してください。"
@@ -2614,6 +2651,8 @@ if selected_menu == "📋 レース分析・予想":
                                     comb_t3,
                                     comb_p3,
                                     comb_t4,
+                                    comb_p4,
+                                    comb_t5,
                                     selected_model,
                                 )
                                 df = parse_json_ai_output(result_text)
@@ -2674,7 +2713,8 @@ if selected_menu == "📋 レース分析・予想":
                 not files_group1
                 and not files_group2
                 and not files_group3
-                and not urls_group4_input.strip()
+                and not files_group4
+                and not urls_group5_input.strip()
             ):
                 st.warning(
                     "⚠️ 解析するデータファイルまたはURLを1つ以上入力してください！"
@@ -2699,7 +2739,10 @@ if selected_menu == "📋 レース分析・予想":
                         t3, p3 = prepare_file_parts(
                             files_group3, pdf_page_option=pdf_opt_val
                         )
-                        t4 = process_multiple_urls(urls_group4_input)
+                        t4, p4 = prepare_file_parts(
+                            files_group4, pdf_page_option=pdf_opt_val
+                        )
+                        t5 = process_multiple_urls(urls_group5_input)
 
                         result_text = analyze_data_with_gemini(
                             active_key,
@@ -2711,6 +2754,8 @@ if selected_menu == "📋 レース分析・予想":
                             t3,
                             p3,
                             t4,
+                            p4,
+                            t5,
                             selected_model,
                         )
 
@@ -3226,7 +3271,7 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         if selected_eval_race:
             matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
             if not matched_df.empty:
-                render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=True)
+                render_race_evaluation_view(matched_df, is_viewer_mode=False, show_chat=True)
             else:
                 st.error(f"⚠️ 選択されたレース「{selected_eval_race}」のデータが見つかりませんでした。")
 
