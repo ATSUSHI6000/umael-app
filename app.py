@@ -795,7 +795,6 @@ def sanitize_dataframe_columns(df):
       "切り",
       "メモ",
       "総合スコア",
-      "年",
       "レース質展開予想",
       "推奨買い目",
       "信頼度",
@@ -909,6 +908,20 @@ def sanitize_dataframe_columns(df):
     return row
 
   df = df.apply(calc_eval_and_marks, axis=1)
+
+  # --- 「年」列を一番右端に配置・補完する処理 ---
+  year_val = "2026"
+  if "年" in df.columns:
+    # 既存の「年」列の値を取得（空でなければその値を優先）
+    first_valid_year = df["年"].dropna().astype(str).str.strip()
+    first_valid_year = first_valid_year[first_valid_year != ""]
+    if not first_valid_year.empty:
+      year_val = first_valid_year.iloc[0]
+    df = df.drop(columns=["年"])
+
+  # データを保持したまま一番右端に「年」列を再配置
+  df["年"] = year_val
+
   return df
 
 
