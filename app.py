@@ -669,8 +669,14 @@ def sanitize_dataframe_columns(df):
         return df
     df = df.copy()
 
+    # 1. 不要な空白列（Q～AJ列などの Unnamed 列）を一括削除
+    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    if unnamed_cols:
+        df = df.drop(columns=unnamed_cols)
+
     df = df.loc[:, ~df.columns.duplicated()]
 
+    # 2. 列名の自動正規化・表記揺れ吸収
     rename_map = {}
     for orig_c in df.columns:
         c_clean = str(orig_c).strip().replace(" ", "").replace("\n", "").replace("\r", "")
@@ -702,6 +708,14 @@ def sanitize_dataframe_columns(df):
             rename_map[orig_c] = "回顧メモ"
         elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
             rename_map[orig_c] = "年"
+        elif c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"] and "レース質展開予想" not in rename_map.values():
+            rename_map[orig_c] = "レース質展開予想"
+        elif c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"] and "推奨買い目" not in rename_map.values():
+            rename_map[orig_c] = "推奨買い目"
+        elif c_clean in ["信頼度", "軸馬信頼度"] and "信頼度" not in rename_map.values():
+            rename_map[orig_c] = "信頼度"
+        elif c_clean in ["波乱度", "波乱度レベル"] and "波乱度" not in rename_map.values():
+            rename_map[orig_c] = "波乱度"
 
     if rename_map:
         df = df.rename(columns=rename_map)
@@ -718,7 +732,8 @@ def sanitize_dataframe_columns(df):
     if "単勝人気" in df.columns:
         df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
 
-    for col in ["評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア", "年"]:
+    # 3. 必須・全頭共通カラムの補完と安全確保
+    for col in ["評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア", "年", "レース質展開予想", "推奨買い目", "信頼度", "波乱度"]:
         if col not in df.columns:
             df[col] = ""
 
