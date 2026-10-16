@@ -673,7 +673,7 @@ def sanitize_dataframe_columns(df):
     return df
   df = df.copy()
 
-  # 1. 不要な空白列（Unnamed: 0〜19 等）および「総合スコアグラフ」列を一括削除
+  # 1. 不要な空白列（Unnamed: 0〜19 等）および不要な「総合スコアグラフ」等の列を一括削除
   drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
   for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
     if drop_col in df.columns:
@@ -777,9 +777,11 @@ def sanitize_dataframe_columns(df):
     )
 
   def clean_pop_number(val):
+    if pd.isna(val) or val is None:
+      return ""
     s = str(val).replace("人気", "").strip()
     m = re.search(r"\d+", s)
-    return int(m.group()) if m else None
+    return int(m.group()) if m else ""
 
   if "予想人気" in df.columns:
     df["予想人気"] = df["予想人気"].apply(clean_pop_number)
@@ -909,17 +911,21 @@ def sanitize_dataframe_columns(df):
 
   df = df.apply(calc_eval_and_marks, axis=1)
 
-  # --- 「年」列を一番右端に配置・補完する処理 ---
+  # 5. 「年」列を必ず一番右端（最終列）に自動配置・セットする処理
   year_val = "2026"
   if "年" in df.columns:
-    # 既存の「年」列の値を取得（空でなければその値を優先）
-    first_valid_year = df["年"].dropna().astype(str).str.strip()
-    first_valid_year = first_valid_year[first_valid_year != ""]
-    if not first_valid_year.empty:
-      year_val = first_valid_year.iloc[0]
+    valid_years = df["年"].dropna().astype(str).str.strip()
+    valid_years = valid_years[
+        (valid_years != "")
+        & (valid_years != "nan")
+        & (valid_years != "None")
+        & (valid_years != "NaN")
+    ]
+    if not valid_years.empty:
+      year_val = valid_years.iloc[0]
     df = df.drop(columns=["年"])
 
-  # データを保持したまま一番右端に「年」列を再配置
+  # データフレームの一番右端に「年」列を再生成してセット
   df["年"] = year_val
 
   return df
