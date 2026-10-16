@@ -667,176 +667,249 @@ def safe_int(val, default=0):
 import re
 import pandas as pd
 
+
 def sanitize_dataframe_columns(df):
-    if df is None or df.empty:
-        return df
-    df = df.copy()
-
-    # 1. 不要な空白列（Unnamed: 0〜19 等）および不要な「総合スコアグラフ」列を一括削除
-    drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
-        if drop_col in df.columns:
-            drop_target_cols.append(drop_col)
-
-    if drop_target_cols:
-        df = df.drop(columns=list(set(drop_target_cols)), errors="ignore")
-
-    df = df.loc[:, ~df.columns.duplicated()]
-
-    # 2. 列名の自動正規化・表記揺れ吸収
-    rename_map = {}
-    for orig_c in df.columns:
-        c_clean = str(orig_c).strip().replace(" ", "").replace("\n", "").replace("\r", "")
-        if c_clean in ["着順", "確定着順", "順位", "着"] and "確定着順" not in rename_map.values():
-            rename_map[orig_c] = "確定着順"
-        elif c_clean in ["レース名", "レース", "Race", "RACE"] and "レース名" not in rename_map.values():
-            rename_map[orig_c] = "レース名"
-        elif c_clean in ["馬名", "競走馬名", "Horse", "HORSE"] and "馬名" not in rename_map.values():
-            rename_map[orig_c] = "馬名"
-        elif c_clean in ["馬番", "馬No", "馬NO", "No", "NO"] and "馬番" not in rename_map.values():
-            rename_map[orig_c] = "馬番"
-        elif c_clean in ["予想人気"] and "予想人気" not in rename_map.values():
-            rename_map[orig_c] = "予想人気"
-        elif c_clean in ["単勝人気", "人気"] and "単勝人気" not in rename_map.values():
-            rename_map[orig_c] = "単勝人気"
-        elif "評価" in c_clean and "評価" not in rename_map.values():
-            rename_map[orig_c] = "評価"
-        elif "軸" in c_clean and "軸" not in rename_map.values():
-            rename_map[orig_c] = "軸"
-        elif "ヒモ" in c_clean and "ヒモ" not in rename_map.values():
-            rename_map[orig_c] = "ヒモ"
-        elif "注" in c_clean and "注" not in rename_map.values():
-            rename_map[orig_c] = "注"
-        elif "切り" in c_clean and "切り" not in rename_map.values():
-            rename_map[orig_c] = "切り"
-        elif c_clean in ["メモ", "見解", "短評", "コメント"] and "メモ" not in rename_map.values():
-            rename_map[orig_c] = "メモ"
-        elif c_clean in ["回顧", "総評", "回顧メモ"] and "回顧メモ" not in rename_map.values():
-            rename_map[orig_c] = "回顧メモ"
-        elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
-            rename_map[orig_c] = "年"
-        elif c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"] and "レース質展開予想" not in rename_map.values():
-            rename_map[orig_c] = "レース質展開予想"
-        elif c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"] and "推奨買い目" not in rename_map.values():
-            rename_map[orig_c] = "推奨買い目"
-        elif c_clean in ["信頼度", "軸馬信頼度"] and "信頼度" not in rename_map.values():
-            rename_map[orig_c] = "信頼度"
-        elif c_clean in ["波乱度", "波乱度レベル"] and "波乱度" not in rename_map.values():
-            rename_map[orig_c] = "波乱度"
-
-    if rename_map:
-        df = df.rename(columns=rename_map)
-
-    df = df.loc[:, ~df.columns.duplicated()]
-
-    # 数値列の調整・クレンジング
-    if "総合スコア" in df.columns:
-        df["総合スコア"] = pd.to_numeric(
-            df["総合スコア"].astype(str).str.replace("点", "").str.strip(), errors="coerce"
-        ).fillna(0).astype(int)
-
-    def clean_pop_number(val):
-        s = str(val).replace("人気", "").strip()
-        m = re.search(r'\d+', s)
-        return int(m.group()) if m else None
-
-    if "予想人気" in df.columns:
-        df["予想人気"] = df["予想人気"].apply(clean_pop_number)
-    if "単勝人気" in df.columns:
-        df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
-
-    # 3. 必須・全頭共通カラムの補完と安全確保
-    for col in ["評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア", "年", "レース質展開予想", "推奨買い目", "信頼度", "波乱度"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    # 4. 1頭ごとの評価判定・印補完・メモ欄（7大要素）自動整形
-    def calc_eval_and_marks(row):
-        score_val = row.get("総合スコア", 0)
-        try:
-            score = int(float(score_val))
-        except (ValueError, TypeError):
-            score = 0
-
-        current_eval = str(row.get("評価", "")).strip()
-
-        if not current_eval or current_eval in ["-", "nan", "None"]:
-            if score >= 93:
-                current_eval = "S"
-            elif score >= 88:
-                current_eval = "A+"
-            elif score >= 84:
-                current_eval = "A"
-            elif score >= 80:
-                current_eval = "B+"
-            elif score >= 74:
-                current_eval = "B"
-            else:
-                current_eval = "C"
-
-        jiku = str(row.get("軸", "")).strip()
-        himo = str(row.get("ヒモ", "")).strip()
-        chu = str(row.get("注", "")).strip()
-        kiri = str(row.get("切り", "")).strip()
-        memo_raw = str(row.get("メモ", "")).strip()
-
-        if not (jiku or himo or chu or kiri):
-            if "【推奨】" in memo_raw or "【軸】" in memo_raw:
-                jiku = "〇"
-            elif "【ヒモ】" in memo_raw:
-                himo = "〇"
-            elif "【注】" in memo_raw:
-                chu = "〇"
-            elif "【切り】" in memo_raw:
-                kiri = "〇"
-            else:
-                if current_eval in ["S"]:
-                    jiku = "〇"
-                elif current_eval in ["S+", "A+", "A", "B+"]:
-                    himo = "〇"
-                elif current_eval in ["B"]:
-                    chu = "〇"
-                else:
-                    kiri = "〇"
-
-        row["評価"] = current_eval
-        row["軸"] = jiku
-        row["ヒモ"] = himo
-        row["注"] = chu
-        row["切り"] = kiri
-
-        # --- メモ欄（T列）ルールVer8.4/8.6準拠の7大詳細要素自動整形 ---
-        if current_eval in ["S"]:
-            label = "【推奨】"
-        elif current_eval in ["A+", "A", "B+"]:
-            label = "【ヒモ】"
-        elif current_eval in ["B"]:
-            label = "【注】"
-        else:
-            label = "【切り】"
-
-        if "【縦横比較】" in memo_raw and "【反証】" in memo_raw:
-            cleaned_m = re.sub(r"^【(推奨|ヒモ|注|切り)】", "", memo_raw).strip()
-            row["メモ"] = f"{label}{cleaned_m}"
-        else:
-            horse_no = str(row.get("馬番", "")).strip()
-            jiko = f"【縦横比較】{memo_raw if memo_raw else '過去実績および同条件の適性を比較。展開・馬場バイアスとの適合度を査定。'}"
-            pro = "【プロ評価】プロ評価でも評価が分かれる一戦。仕上がり・気配を重視。"
-            time_bp = "【タイム評価/BP】近走タイム指数（TI）および中間時計を算出・換算。"
-            fb_wt_rs = f"【FB/WT/RS】FB:{horse_no}番枠、WT:馬体重順調、RS:脚質適性照合。"
-            
-            if current_eval in ["S", "A+", "A"]:
-                hansho = "【反証】重賞の展開過熱によるオーバーペースや、他馬からのマークが厳しくなる懸念あり。"
-            else:
-                hansho = "【反証】格上相手のスピード勝負において追走負荷が高く、決め手比べで見劣るリスクが高い。"
-                
-            special_label = f"【特殊ラベル】{current_eval}評価 / 適性査定済"
-            row["メモ"] = f"{label}{jiko}{pro}{time_bp}{fb_wt_rs}{hansho}{special_label}"
-
-        return row
-
-    df = df.apply(calc_eval_and_marks, axis=1)
+  if df is None or df.empty:
     return df
+  df = df.copy()
+
+  # 1. 不要な空白列（Unnamed: 0〜19 等）および「総合スコアグラフ」列を一括削除
+  drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+  for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
+    if drop_col in df.columns:
+      drop_target_cols.append(drop_col)
+
+  if drop_target_cols:
+    df = df.drop(columns=list(set(drop_target_cols)), errors="ignore")
+
+  df = df.loc[:, ~df.columns.duplicated()]
+
+  # 2. 列名の自動正規化・表記揺れ吸収
+  rename_map = {}
+  for orig_c in df.columns:
+    c_clean = (
+        str(orig_c).strip().replace(" ", "").replace("\n", "").replace("\r", "")
+    )
+    if (
+        c_clean in ["着順", "確定着順", "順位", "着"]
+        and "確定着順" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "確定着順"
+    elif (
+        c_clean in ["レース名", "レース", "Race", "RACE"]
+        and "レース名" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "レース名"
+    elif (
+        c_clean in ["馬名", "競走馬名", "Horse", "HORSE"]
+        and "馬名" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "馬名"
+    elif (
+        c_clean in ["馬番", "馬No", "馬NO", "No", "NO"]
+        and "馬番" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "馬番"
+    elif c_clean in ["予想人気"] and "予想人気" not in rename_map.values():
+      rename_map[orig_c] = "予想人気"
+    elif (
+        c_clean in ["単勝人気", "人気"]
+        and "単勝人気" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "単勝人気"
+    elif "評価" in c_clean and "評価" not in rename_map.values():
+      rename_map[orig_c] = "評価"
+    elif "軸" in c_clean and "軸" not in rename_map.values():
+      rename_map[orig_c] = "軸"
+    elif "ヒモ" in c_clean and "ヒモ" not in rename_map.values():
+      rename_map[orig_c] = "ヒモ"
+    elif "注" in c_clean and "注" not in rename_map.values():
+      rename_map[orig_c] = "注"
+    elif "切り" in c_clean and "切り" not in rename_map.values():
+      rename_map[orig_c] = "切り"
+    elif (
+        c_clean in ["メモ", "見解", "短評", "コメント"]
+        and "メモ" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "メモ"
+    elif (
+        c_clean in ["回顧", "総評", "回顧メモ"]
+        and "回顧メモ" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "回顧メモ"
+    elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
+      rename_map[orig_c] = "年"
+    elif (
+        c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"]
+        and "レース質展開予想" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "レース質展開予想"
+    elif (
+        c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"]
+        and "推奨買い目" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "推奨買い目"
+    elif (
+        c_clean in ["信頼度", "軸馬信頼度"]
+        and "信頼度" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "信頼度"
+    elif (
+        c_clean in ["波乱度", "波乱度レベル"]
+        and "波乱度" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "波乱度"
+
+  if rename_map:
+    df = df.rename(columns=rename_map)
+
+  df = df.loc[:, ~df.columns.duplicated()]
+
+  # 数値列の調整・クレンジング
+  if "総合スコア" in df.columns:
+    df["総合スコア"] = (
+        pd.to_numeric(
+            df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
+            errors="coerce",
+        )
+        .fillna(0)
+        .astype(int)
+    )
+
+  def clean_pop_number(val):
+    s = str(val).replace("人気", "").strip()
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else None
+
+  if "予想人気" in df.columns:
+    df["予想人気"] = df["予想人気"].apply(clean_pop_number)
+  if "単勝人気" in df.columns:
+    df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
+
+  # 3. 必須・全頭共通カラムの補完と安全確保
+  for col in [
+      "評価",
+      "軸",
+      "ヒモ",
+      "注",
+      "切り",
+      "メモ",
+      "総合スコア",
+      "年",
+      "レース質展開予想",
+      "推奨買い目",
+      "信頼度",
+      "波乱度",
+  ]:
+    if col not in df.columns:
+      df[col] = ""
+
+  # 4. 1頭ごとの評価判定・印補完・メモ欄（7大要素）自動整形
+  def calc_eval_and_marks(row):
+    score_val = row.get("総合スコア", 0)
+    try:
+      score = int(float(score_val))
+    except (ValueError, TypeError):
+      score = 0
+
+    current_eval = str(row.get("評価", "")).strip()
+
+    if not current_eval or current_eval in ["-", "nan", "None"]:
+      if score >= 93:
+        current_eval = "S"
+      elif score >= 88:
+        current_eval = "A+"
+      elif score >= 84:
+        current_eval = "A"
+      elif score >= 80:
+        current_eval = "B+"
+      elif score >= 74:
+        current_eval = "B"
+      else:
+        current_eval = "C"
+
+    jiku = str(row.get("軸", "")).strip()
+    himo = str(row.get("ヒモ", "")).strip()
+    chu = str(row.get("注", "")).strip()
+    kiri = str(row.get("切り", "")).strip()
+    memo_raw = str(row.get("メモ", "")).strip()
+
+    if not (jiku or himo or chu or kiri):
+      if "【推奨】" in memo_raw or "【軸】" in memo_raw:
+        jiku = "〇"
+      elif "【ヒモ】" in memo_raw:
+        himo = "〇"
+      elif "【注】" in memo_raw:
+        chu = "〇"
+      elif "【切り】" in memo_raw:
+        kiri = "〇"
+      else:
+        if current_eval in ["S"]:
+          jiku = "〇"
+        elif current_eval in ["S+", "A+", "A", "B+"]:
+          himo = "〇"
+        elif current_eval in ["B"]:
+          chu = "〇"
+        else:
+          kiri = "〇"
+
+    row["評価"] = current_eval
+    row["軸"] = jiku
+    row["ヒモ"] = himo
+    row["注"] = chu
+    row["切り"] = kiri
+
+    # メモ欄（T列）ルールVer8.4/8.6準拠の7大詳細要素自動整形
+    if current_eval in ["S"]:
+      label = "【推奨】"
+    elif current_eval in ["A+", "A", "B+"]:
+      label = "【ヒモ】"
+    elif current_eval in ["B"]:
+      label = "【注】"
+    else:
+      label = "【切り】"
+
+    if "【縦横比較】" in memo_raw and "【反証】" in memo_raw:
+      cleaned_m = re.sub(r"^【(推奨|ヒモ|注|切り)】", "", memo_raw).strip()
+      row["メモ"] = f"{label}{cleaned_m}"
+    else:
+      horse_no = str(row.get("馬番", "")).strip()
+      jiko = (
+          "【縦横比較】"
+          + (
+              memo_raw
+              if memo_raw
+              else (
+                  "過去実績および同条件の適性を比較。展開・馬場バイアスとの適合度を査定。"
+              )
+          )
+      )
+      pro = "【プロ評価】プロ評価でも評価が分かれる一戦。仕上がり・気配を重視。"
+      time_bp = (
+          "【タイム評価/BP】近走タイム指数（TI）および中間時計を算出・換算。"
+      )
+      fb_wt_rs = (
+          f"【FB/WT/RS】FB:{horse_no}番枠、WT:馬体重順調、RS:脚質適性照合。"
+      )
+
+      if current_eval in ["S", "A+", "A"]:
+        hansho = (
+            "【反証】重賞の展開過熱によるオーバーペースや、他馬からのマークが厳しくなる懸念あり。"
+        )
+      else:
+        hansho = (
+            "【反証】格上相手のスピード勝負において追走負荷が高く、決め手比べで見劣るリスクが高い。"
+        )
+
+      special_label = f"【特殊ラベル】{current_eval}評価 / 適性査定済"
+      row["メモ"] = (
+          f"{label}{jiko}{pro}{time_bp}{fb_wt_rs}{hansho}{special_label}"
+      )
+
+    return row
+
+  df = df.apply(calc_eval_and_marks, axis=1)
+  return df
 
 
 def migrate_and_clean_all_dbs():
