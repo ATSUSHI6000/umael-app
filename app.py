@@ -669,10 +669,14 @@ def sanitize_dataframe_columns(df):
         return df
     df = df.copy()
 
-    # 1. 不要な空白列（Q～AJ列などの Unnamed 列）を一括削除
-    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    if unnamed_cols:
-        df = df.drop(columns=unnamed_cols)
+    # 1. 不要な空白列（Unnamed列）および不要な「総合スコアグラフ」列を一括削除
+    drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
+        if drop_col in df.columns:
+            drop_target_cols.append(drop_col)
+
+    if drop_target_cols:
+        df = df.drop(columns=list(set(drop_target_cols)), errors="ignore")
 
     df = df.loc[:, ~df.columns.duplicated()]
 
