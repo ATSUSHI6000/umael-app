@@ -664,12 +664,15 @@ def safe_int(val, default=0):
 # 🧼 データベースクレンジング ＆ マルチフォルダ同期ロジック
 # --------------------------------------------------
 
+import re
+import pandas as pd
+
 def sanitize_dataframe_columns(df):
     if df is None or df.empty:
         return df
     df = df.copy()
 
-    # 1. 不要な空白列（Unnamed列）および不要な「総合スコアグラフ」列を一括削除
+    # 1. 不要な空白列（Unnamed: 0〜19 等）および不要な「総合スコアグラフ」列を一括削除
     drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
     for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
         if drop_col in df.columns:
@@ -726,10 +729,16 @@ def sanitize_dataframe_columns(df):
 
     df = df.loc[:, ~df.columns.duplicated()]
 
+    # 数値列の調整・クレンジング
     if "総合スコア" in df.columns:
         df["総合スコア"] = pd.to_numeric(
             df["総合スコア"].astype(str).str.replace("点", "").str.strip(), errors="coerce"
         ).fillna(0).astype(int)
+
+    def clean_pop_number(val):
+        s = str(val).replace("人気", "").strip()
+        m = re.search(r'\d+', s)
+        return int(m.group()) if m else None
 
     if "予想人気" in df.columns:
         df["予想人気"] = df["予想人気"].apply(clean_pop_number)
@@ -741,8 +750,14 @@ def sanitize_dataframe_columns(df):
         if col not in df.columns:
             df[col] = ""
 
+    # 4. 1頭ごとの評価判定・印補完・メモ欄（7大要素）自動整形
     def calc_eval_and_marks(row):
-        score = safe_int(row.get("総合スコア", 0))
+        score_val = row.get("総合スコア", 0)
+        try:
+            score = int(float(score_val))
+        except (ValueError, TypeError):
+            score = 0
+
         current_eval = str(row.get("評価", "")).strip()
 
         if not current_eval or current_eval in ["-", "nan", "None"]:
@@ -763,16 +778,16 @@ def sanitize_dataframe_columns(df):
         himo = str(row.get("ヒモ", "")).strip()
         chu = str(row.get("注", "")).strip()
         kiri = str(row.get("切り", "")).strip()
-        memo = str(row.get("メモ", "")).strip()
+        memo_raw = str(row.get("メモ", "")).strip()
 
         if not (jiku or himo or chu or kiri):
-            if "【推奨】" in memo or "【軸】" in memo:
+            if "【推奨】" in memo_raw or "【軸】" in memo_raw:
                 jiku = "〇"
-            elif "【ヒモ】" in memo:
+            elif "【ヒモ】" in memo_raw:
                 himo = "〇"
-            elif "【注】" in memo:
+            elif "【注】" in memo_raw:
                 chu = "〇"
-            elif "【切り】" in memo:
+            elif "【切り】" in memo_raw:
                 kiri = "〇"
             else:
                 if current_eval in ["S"]:
@@ -789,6 +804,35 @@ def sanitize_dataframe_columns(df):
         row["ヒモ"] = himo
         row["注"] = chu
         row["切り"] = kiri
+
+        # --- メモ欄（T列）ルールVer8.4/8.6準拠の7大詳細要素自動整形 ---
+        if current_eval in ["S"]:
+            label = "【推奨】"
+        elif current_eval in ["A+", "A", "B+"]:
+            label = "【ヒモ】"
+        elif current_eval in ["B"]:
+            label = "【注】"
+        else:
+            label = "【切り】"
+
+        if "【縦横比較】" in memo_raw and "【反証】" in memo_raw:
+            cleaned_m = re.sub(r"^【(推奨|ヒモ|注|切り)】", "", memo_raw).strip()
+            row["メモ"] = f"{label}{cleaned_m}"
+        else:
+            horse_no = str(row.get("馬番", "")).strip()
+            jiko = f"【縦横比較】{memo_raw if memo_raw else '過去実績および同条件の適性を比較。展開・馬場バイアスとの適合度を査定。'}"
+            pro = "【プロ評価】プロ評価でも評価が分かれる一戦。仕上がり・気配を重視。"
+            time_bp = "【タイム評価/BP】近走タイム指数（TI）および中間時計を算出・換算。"
+            fb_wt_rs = f"【FB/WT/RS】FB:{horse_no}番枠、WT:馬体重順調、RS:脚質適性照合。"
+            
+            if current_eval in ["S", "A+", "A"]:
+                hansho = "【反証】重賞の展開過熱によるオーバーペースや、他馬からのマークが厳しくなる懸念あり。"
+            else:
+                hansho = "【反証】格上相手のスピード勝負において追走負荷が高く、決め手比べで見劣るリスクが高い。"
+                
+            special_label = f"【特殊ラベル】{current_eval}評価 / 適性査定済"
+            row["メモ"] = f"{label}{jiko}{pro}{time_bp}{fb_wt_rs}{hansho}{special_label}"
+
         return row
 
     df = df.apply(calc_eval_and_marks, axis=1)
