@@ -940,6 +940,140 @@ def save_to_db(new_df):
     return load_db(f"{year_val}年")
 
 
+def bulk_import_to_db(import_df):
+    """スプレッドシートやCSVからの一括データをフォーマットクレンジングして一発保存"""
+    if import_df is None or import_df.empty:
+        return 0, 0
+
+    clean_df = sanitize_dataframe_columns(import_df)
+
+    if "年" not in clean_df.columns:
+        if "レース名" in clean_df.columns:
+            clean_df["年"] = clean_df["レース名"].apply(extract_year_from_race_name)
+        else:
+            clean_df["年"] = get_current_year_str()
+    else:
+        clean_df["年"] = clean_df["年"].fillna("").astype(str)
+        mask_empty = (clean_df["年"] == "") | (clean_df["年"] == "None") | (clean_df["年"] == "nan") | (clean_df["年"] == "NaN")
+        if mask_empty.any() and "レース名" in clean_df.columns:
+            clean_df.loc[mask_empty, "年"] = clean_df.loc[mask_empty, "レース名"].apply(extract_year_from_race_name)
+
+    total_rows = len(clean_df)
+    races_count = 0
+
+    if "レース名" in clean_df.columns:
+        unique_races = clean_df["レース名"].dropna().unique()
+        races_count = len(unique_races)
+        for r_name in unique_races:
+            if not str(r_name).strip():
+                continue
+            sub_r_df = clean_df[clean_df["レース名"] == r_name]
+            save_to_db(sub_r_df)
+    else:
+        save_to_db(clean_df)
+        races_count = 1
+
+    return races_count, total_rows
+
+
+def convert_gsheet_url_to_csv(url):
+    """Googleスプレッドシートの閲覧URLからCSV形式ダウンロードURLへ自動変換"""
+    url = url.strip()
+    m = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+    if m:
+        sheet_id = m.group(1)
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+        gid_m = re.search(r"[#&?]gid=([0-9]+)", url)
+        if gid_m:
+            csv_url += f"&gid={gid_m.group(1)}"
+        return csv_url
+    return url
+
+
+def render_spreadsheet_import_ui():
+    """スプレッドシート（URL / CSVファイル複数一括 / コピペ）一括流し込みUI"""
+    with st.expander("📥 【過去データ復元】スプレッドシート（URL / CSV / コピペ）一括流し込み", expanded=True):
+        st.write("お手元の過去レースCSVファイルやスプレッドシートのデータを、一発でデータベース（ルートおよび年度別フォルダ `data/YYYY/`）に復元・流し込みできます。")
+
+        import_tab1, import_tab2, import_tab3 = st.tabs([
+            "📂 CSVファイルをアップロードして流し込み（複数一括可）",
+            "🔗 GoogleスプレッドシートURLから流し込み",
+            "📋 テキスト（コピペ）から流し込み"
+        ])
+
+        with import_tab1:
+            uploaded_csv_files = st.file_uploader(
+                "過去レースのCSVファイル (.csv / 複数ファイル一括選択可) を選択",
+                type=["csv"],
+                accept_multiple_files=True,
+                key="import_csv_uploader"
+            )
+            if st.button("🚀 CSVファイルから一括流し込み実行", key="btn_import_csv", type="primary"):
+                if not uploaded_csv_files:
+                    st.warning("⚠️ CSVファイルを1つ以上アップロードしてください！")
+                else:
+                    with st.spinner("🏇 CSVファイルを解析し、一括流し込み中..."):
+                        total_races = 0
+                        total_rows = 0
+                        success_files = 0
+                        for uploaded_csv in uploaded_csv_files:
+                            try:
+                                uploaded_csv.seek(0)
+                                imp_df = pd.read_csv(uploaded_csv, dtype=str).fillna("")
+                                r_cnt, row_cnt = bulk_import_to_db(imp_df)
+                                total_races += r_cnt
+                                total_rows += row_cnt
+                                success_files += 1
+                            except Exception as e:
+                                st.error(f"❌ 「{uploaded_csv.name}」の読み込み中にエラーが発生しました: {e}")
+                        
+                        if success_files > 0:
+                            st.success(f"🎉 CSVファイル（{success_files}件）から {total_races} レース分（計 {total_rows} 頭データ）を一括流し込み・復元しました！")
+                            st.rerun()
+
+        with import_tab2:
+            gsheet_url = st.text_input(
+                "Googleスプレッドシートの共有URLを入力",
+                placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0",
+                key="import_gsheet_url_input"
+            )
+            st.caption("※スプレッドシートの共有設定を「リンクを知っている全員」に設定しておいてください。")
+            if st.button("🚀 Googleスプレッドシートから一括流し込み実行", key="btn_import_gsheet", type="primary"):
+                if not gsheet_url.strip():
+                    st.warning("⚠️ スプレッドシートのURLを入力してください！")
+                else:
+                    with st.spinner("🏇 スプレッドシートからデータを取得し、一括流し込み中..."):
+                        try:
+                            csv_export_url = convert_gsheet_url_to_csv(gsheet_url)
+                            imp_df = pd.read_csv(csv_export_url, dtype=str).fillna("")
+                            r_cnt, row_cnt = bulk_import_to_db(imp_df)
+                            st.success(f"🎉 スプレッドシートから {r_cnt} レース分（計 {row_cnt} 頭データ）を一括流し込み・復元しました！")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ スプレッドシートからの読み込み中にエラーが発生しました: {e}\nURLやアクセス権限（リンクを知っている全員に公開）をご確認ください。")
+
+        with import_tab3:
+            raw_paste_text = st.text_area(
+                "スプレッドシートのセルをコピーして直接貼り付け（TSV / CSV）",
+                height=150,
+                placeholder="レース名\t馬番\t馬名\t総合スコア\t評価...\n（表データをそのまま貼ってください）",
+                key="import_paste_text"
+            )
+            if st.button("🚀 貼り付けテキストから一括流し込み実行", key="btn_import_paste", type="primary"):
+                if not raw_paste_text.strip():
+                    st.warning("⚠️ データを貼り付けてください！")
+                else:
+                    with st.spinner("🏇 貼り付けデータを解析し、一括流し込み中..."):
+                        try:
+                            sep = "\t" if "\t" in raw_paste_text else ","
+                            imp_df = pd.read_csv(io.StringIO(raw_paste_text.strip()), sep=sep, dtype=str).fillna("")
+                            r_cnt, row_cnt = bulk_import_to_db(imp_df)
+                            st.success(f"🎉 貼り付けデータから {r_cnt} レース分（計 {row_cnt} 頭データ）を一括流し込み・復元しました！")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ 貼り付けデータの読み込み中にエラーが発生しました: {e}")
+
+
 def update_db_with_recap(race_name, result_df, memo_text):
     if not os.path.exists(DB_FILE):
         return
@@ -2109,11 +2243,9 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 )
 
     if is_viewer_mode:
-        # ★共有モード（ビューアー表示）の場合は買い目描画で即座にピタッと終了！チャット・詳細データ表等は完全非表示
         render_summary_body()
         return
 
-    # 管理・通常閲覧モード時のタブ構成
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
     )
@@ -2198,7 +2330,6 @@ st.markdown(
         border-radius: 4px !important;
     }
     
-    /* アクションボタン オレンジ系統一 */
     div.stButton > button,
     button[data-testid="stBaseButton-secondary"],
     button[data-testid="stBaseButton-primary"] {
@@ -2399,6 +2530,9 @@ with st.sidebar:
 # --------------------------------------------------
 
 if selected_menu == "📋 レース分析・予想":
+    render_spreadsheet_import_ui()
+    st.divider()
+
     st.subheader("🎯 解析ルールの選択 ＆ 段階的データ保存")
 
     rule_type = st.radio(
@@ -3400,6 +3534,9 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 elif selected_menu == "🗄 過去馬データベース（プール）":
     st.subheader("🗄️ 過去馬データベース（プール一覧・レース別閲覧）")
     
+    render_spreadsheet_import_ui()
+    st.divider()
+
     available_years = get_available_years_in_db()
     selected_year = st.selectbox("📅 閲覧する年度を選択してください：", available_years + ["全期間"], index=0, key="db_year_select")
 
