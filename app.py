@@ -122,12 +122,14 @@ def clean_pop_number(val):
 
 
 def extract_year_from_race_name(race_name):
-    if not race_name:
-        return "2026"
+    """レース名から年度を取得。年度が含まれない場合は当年を使う。"""
+    current_year = time.strftime("%Y")
+    if race_name is None or not str(race_name).strip():
+        return current_year
     m = re.search(r"(20\d{2})", str(race_name))
     if m:
         return m.group(1)
-    return "2026"
+    return current_year
 
 
 def detect_race_grade(race_name):
@@ -911,58 +913,113 @@ def sanitize_dataframe_columns(df):
 
   df = df.apply(calc_eval_and_marks, axis=1)
 
-  # 5. 「年」列を必ず一番右端（最終列）に自動配置・セットする処理
-  year_val = "2026"
-  if "年" in df.columns:
-    valid_years = df["年"].dropna().astype(str).str.strip()
-    valid_years = valid_years[
-        (valid_years != "")
-        & (valid_years != "nan")
-        & (valid_years != "None")
-        & (valid_years != "NaN")
-    ]
-    if not valid_years.empty:
-      year_val = valid_years.iloc[0]
-    df = df.drop(columns=["年"])
+  # 5. 各行のレース名・既存年度を使って「年」を行単位で補完し、必ず最右列へ配置
+  existing_years = df["年"].copy() if "年" in df.columns else pd.Series("", index=df.index)
+  years = []
+  current_year = time.strftime("%Y")
+  for pos, (_, row) in enumerate(df.iterrows()):
+    race_name = str(row.get("レース名", "") or "").strip()
+    # レース名に西暦がある場合は、保存先の誤分類を防ぐためレース名の年度を優先
+    race_year_match = re.search(r"(20\d{2})", race_name)
+    if race_year_match:
+      year_val = race_year_match.group(1)
+    else:
+      raw_year = str(existing_years.iloc[pos] if pos < len(existing_years) else "").strip()
+      raw_year_match = re.search(r"(20\d{2})", raw_year)
+      year_val = raw_year_match.group(1) if raw_year_match else current_year
+    years.append(year_val)
 
-  # データフレームの一番右端に「年」列を再生成してセット
-  df["年"] = year_val
+  if "年" in df.columns:
+    df = df.drop(columns=["年"])
+  df["年"] = years
+  df = df[[col for col in df.columns if col != "年"] + ["年"]]
 
   return df
 
 
 def migrate_and_clean_all_dbs():
+    """既存DBをクレンジングし、レースの年度ごとに data/YYYY へ振り分ける。"""
+    candidates = []
+
+    # 年度フォルダ側のデータを先に読み込む。後から読むルートDBを新しい値として優先する。
+    if os.path.isdir(DATA_DIR):
+        for entry in sorted(os.listdir(DATA_DIR)):
+            y_dir = os.path.join(DATA_DIR, entry)
+            if not os.path.isdir(y_dir) or not re.fullmatch(r"20\d{2}", entry):
+                continue
+            y_file = os.path.join(y_dir, DB_FILE)
+            if not os.path.exists(y_file):
+                continue
+            try:
+                ydf = pd.read_csv(y_file, dtype=str).fillna("")
+                if ydf.empty:
+                    continue
+                if "年" not in ydf.columns:
+                    ydf["年"] = entry
+                else:
+                    ydf["年"] = ydf["年"].replace({"": entry, "None": entry, "nan": entry, "NaN": entry})
+                candidates.append(sanitize_dataframe_columns(ydf))
+            except Exception:
+                continue
+
+    # ルートDBは最も新しい保存先として最後に追加する
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
             if not root_df.empty:
-                clean_df = sanitize_dataframe_columns(root_df)
-                if "年" not in clean_df.columns and "レース名" in clean_df.columns:
-                    clean_df["年"] = clean_df["レース名"].apply(extract_year_from_race_name)
-                clean_df["年"] = clean_df["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
-                clean_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+                candidates.append(sanitize_dataframe_columns(root_df))
         except Exception:
             pass
 
-    if os.path.exists(DATA_DIR):
-        for entry in os.listdir(DATA_DIR):
-            y_dir = os.path.join(DATA_DIR, entry)
-            if os.path.isdir(y_dir):
-                y_file = os.path.join(y_dir, DB_FILE)
-                if os.path.exists(y_file):
-                    try:
-                        ydf = pd.read_csv(y_file, dtype=str).fillna("")
-                        if not ydf.empty:
-                            clean_ydf = sanitize_dataframe_columns(ydf)
-                            if "年" not in clean_ydf.columns and "レース名" in clean_ydf.columns:
-                                clean_ydf["年"] = clean_ydf["レース名"].apply(extract_year_from_race_name)
-                            clean_ydf["年"] = clean_ydf["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
-                            clean_ydf.to_csv(y_file, index=False, encoding="utf-8-sig")
-                    except Exception:
-                        pass
+    if not candidates:
+        return
 
+    try:
+        combined = pd.concat(candidates, ignore_index=True, sort=False).fillna("")
+        combined = sanitize_dataframe_columns(combined)
 
-def load_db(selected_year="2026年"):
+        if "レース名" in combined.columns:
+            combined["レース名"] = combined["レース名"].astype(str).str.strip()
+            combined = combined[combined["レース名"] != ""].copy()
+        if "レース名" in combined.columns and "馬番" in combined.columns:
+            combined = combined.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
+        combined = sanitize_dataframe_columns(combined)
+        combined.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+
+        # 既存年度フォルダ内に別年度の行が混在していた場合も、年度ごとに再分配する。
+        if "年" not in combined.columns:
+            combined["年"] = combined["レース名"].apply(extract_year_from_race_name) if "レース名" in combined.columns else time.strftime("%Y")
+        combined["年"] = combined["年"].astype(str).str.extract(r"(20\d{2})", expand=False).fillna(time.strftime("%Y"))
+        combined = combined[[col for col in combined.columns if col != "年"] + ["年"]]
+
+        known_years = set()
+        if os.path.isdir(DATA_DIR):
+            known_years = {
+                entry for entry in os.listdir(DATA_DIR)
+                if os.path.isdir(os.path.join(DATA_DIR, entry)) and re.fullmatch(r"20\d{2}", entry)
+            }
+        row_years = set(combined["年"].dropna().astype(str).tolist())
+        for year_val in sorted(known_years | row_years):
+            if not re.fullmatch(r"20\d{2}", str(year_val)):
+                continue
+            year_dir = os.path.join(DATA_DIR, str(year_val))
+            os.makedirs(year_dir, exist_ok=True)
+            year_db_path = os.path.join(year_dir, DB_FILE)
+            year_df = combined[combined["年"].astype(str) == str(year_val)].copy()
+            if year_df.empty:
+                # 清除旧版本误把其他年度写进来的错误文件
+                if os.path.exists(year_db_path):
+                    os.remove(year_db_path)
+            else:
+                year_df = year_df[[col for col in year_df.columns if col != "年"] + ["年"]]
+                year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+    except Exception:
+        # DBの読み込み障害でアプリ全体を止めない
+        pass
+
+def load_db(selected_year=None):
+    if selected_year is None:
+        selected_year = f"{time.strftime('%Y')}年"
     migrate_and_clean_all_dbs()
 
     all_dfs = []
@@ -1034,10 +1091,10 @@ def load_db(selected_year="2026年"):
 def get_available_years_in_db():
     df = load_db(selected_year="全期間")
     if df.empty or "年" not in df.columns:
-        return ["2026年"]
+        return [f"{time.strftime('%Y')}年"]
     years = sorted(df["年"].dropna().unique().tolist(), reverse=True)
     formatted = [f"{y}年" for y in years if str(y).isdigit()]
-    return formatted if formatted else ["2026年"]
+    return formatted if formatted else [f"{time.strftime('%Y')}年"]
 
 
 def save_to_db(new_df):
@@ -1045,49 +1102,76 @@ def save_to_db(new_df):
         return load_db()
 
     clean_save_df = sanitize_dataframe_columns(new_df)
-    
-    if "年" not in clean_save_df.columns or clean_save_df["年"].iloc[0] == "":
-        race_n = clean_save_df["レース名"].iloc[0] if "レース名" in clean_save_df.columns else ""
-        clean_save_df["年"] = extract_year_from_race_name(race_n)
+    if "レース名" not in clean_save_df.columns:
+        st.warning("⚠️ レース名がないため、年度別保存を実行できませんでした。")
+        return load_db("全期間")
 
-    year_val = str(clean_save_df["年"].iloc[0]).strip()
-    if not year_val or year_val in ["None", "nan"]:
-        year_val = "2026"
+    # 新規保存対象のレース名を取り出す（同じレースの古い行を置き換える）
+    save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
+    save_races = [r for r in save_races if r]
 
-    # 1. ルート直下 umael_database.csv 保存
+    # 1. ルート直下のマスターDBを更新
     if os.path.exists(DB_FILE):
         try:
-            old_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
-            if "レース名" in clean_save_df.columns and "レース名" in old_df.columns:
-                race_n = clean_save_df["レース名"].iloc[0]
-                old_df = old_df[old_df["レース名"].astype(str) != str(race_n)]
-            combined_df = pd.concat([old_df, clean_save_df], ignore_index=True)
-            combined_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+            root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+            root_df = sanitize_dataframe_columns(root_df) if not root_df.empty else root_df
         except Exception:
-            clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+            root_df = pd.DataFrame()
     else:
-        clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+        root_df = pd.DataFrame()
 
-    # 2. data/YYYY/umael_database.csv 保存
-    year_dir = os.path.join(DATA_DIR, year_val)
-    os.makedirs(year_dir, exist_ok=True)
-    year_db_path = os.path.join(year_dir, DB_FILE)
+    if not root_df.empty and "レース名" in root_df.columns:
+        root_df = root_df[~root_df["レース名"].astype(str).str.strip().isin(save_races)]
+    combined_root = pd.concat([root_df, clean_save_df], ignore_index=True, sort=False)
+    combined_root = sanitize_dataframe_columns(combined_root)
+    if "レース名" in combined_root.columns and "馬番" in combined_root.columns:
+        combined_root = combined_root.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
+    combined_root = combined_root[[col for col in combined_root.columns if col != "年"] + ["年"]]
+    combined_root.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-    if os.path.exists(year_db_path):
-        try:
-            old_ydf = pd.read_csv(year_db_path, dtype=str).fillna("")
-            if "レース名" in clean_save_df.columns and "レース名" in old_ydf.columns:
-                race_n = clean_save_df["レース名"].iloc[0]
-                old_ydf = old_ydf[old_ydf["レース名"].astype(str) != str(race_n)]
-            combined_ydf = pd.concat([old_ydf, clean_save_df], ignore_index=True)
-            combined_ydf.to_csv(year_db_path, index=False, encoding="utf-8-sig")
-        except Exception:
-            clean_save_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
-    else:
-        clean_save_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+    # 2. データを行ごとの「年」でグループ化して、自動で年度フォルダを作成・更新
+    if "年" not in clean_save_df.columns:
+        clean_save_df["年"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
+    clean_save_df["年"] = clean_save_df["年"].astype(str).str.extract(r"(20\d{2})", expand=False).fillna(time.strftime("%Y"))
 
-    return load_db(f"{year_val}年")
+    for year_val, year_new_df in clean_save_df.groupby("年", sort=False):
+        year_val = str(year_val)
+        if not re.fullmatch(r"20\d{2}", year_val):
+            year_val = time.strftime("%Y")
+            year_new_df = year_new_df.copy()
+            year_new_df["年"] = year_val
+        year_dir = os.path.join(DATA_DIR, year_val)
+        os.makedirs(year_dir, exist_ok=True)
+        year_db_path = os.path.join(year_dir, DB_FILE)
 
+        if os.path.exists(year_db_path):
+            try:
+                old_year_df = pd.read_csv(year_db_path, dtype=str).fillna("")
+                old_year_df = sanitize_dataframe_columns(old_year_df) if not old_year_df.empty else old_year_df
+            except Exception:
+                old_year_df = pd.DataFrame()
+        else:
+            old_year_df = pd.DataFrame()
+
+        if not old_year_df.empty:
+            if "年" in old_year_df.columns:
+                old_year_df = old_year_df[old_year_df["年"].astype(str) == year_val]
+            if "レース名" in old_year_df.columns:
+                replacing_races = year_new_df["レース名"].astype(str).str.strip().unique().tolist()
+                old_year_df = old_year_df[~old_year_df["レース名"].astype(str).str.strip().isin(replacing_races)]
+
+        combined_year_df = pd.concat([old_year_df, year_new_df], ignore_index=True, sort=False)
+        combined_year_df = sanitize_dataframe_columns(combined_year_df)
+        combined_year_df = combined_year_df[combined_year_df["年"].astype(str) == year_val].copy()
+        if "レース名" in combined_year_df.columns and "馬番" in combined_year_df.columns:
+            combined_year_df = combined_year_df.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
+        combined_year_df = combined_year_df[[col for col in combined_year_df.columns if col != "年"] + ["年"]]
+        combined_year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+
+    # 再読込時にも既存ファイルを年度別に再整理する
+    unique_years = clean_save_df["年"].dropna().astype(str).unique().tolist()
+    selected_year = f"{unique_years[0]}年" if len(unique_years) == 1 else "全期間"
+    return load_db(selected_year=selected_year)
 
 def update_db_with_recap(race_name, result_df, memo_text):
     if not os.path.exists(DB_FILE):
@@ -1132,13 +1216,21 @@ def update_db_with_recap(race_name, result_df, memo_text):
                             df.at[idx, col] = str(value).strip()
             df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
+        df = sanitize_dataframe_columns(df)
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
-        
-        # 年度サブフォルダにも反映
+
+        # 年度フォルダには、その年度のデータだけを保存（別年度の行を混在させない）
         year_val = extract_year_from_race_name(race_name)
-        year_db_path = os.path.join(DATA_DIR, year_val, DB_FILE)
-        if os.path.exists(year_db_path):
-            df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+        if "年" in df.columns and mask.any():
+            saved_year = str(df.loc[mask, "年"].iloc[0]).strip()
+            if re.fullmatch(r"20\d{2}", saved_year):
+                year_val = saved_year
+        year_dir = os.path.join(DATA_DIR, year_val)
+        os.makedirs(year_dir, exist_ok=True)
+        year_db_path = os.path.join(year_dir, DB_FILE)
+        year_df = df[df["年"].astype(str) == str(year_val)].copy() if "年" in df.columns else df.copy()
+        year_df = year_df[[col for col in year_df.columns if col != "年"] + (["年"] if "年" in year_df.columns else [])]
+        year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
     except Exception as e:
         st.warning(f"⚠️ データベースの回顧・着順プール保存中に注意: {e}")
@@ -1643,7 +1735,7 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
 
                                 st.markdown("#### 📊 修正後の馬別スコア一覧")
                                 st.dataframe(
-                                    updated_df[["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ"]],
+                                    updated_df[["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ","年"]],
                                     use_container_width=True
                                 )
 
@@ -1965,7 +2057,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
     )
     
     view_df = df.drop(
-        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気", "年度", "年"],
+        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気", "年度"],
         errors="ignore",
     ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
@@ -1975,8 +2067,9 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
         "軸", "ヒモ", "注", "切り", "メモ"
     ]
     existing_cols = [c for c in target_order if c in view_df.columns]
-    other_cols = [c for c in view_df.columns if c not in target_order]
-    view_df = view_df[existing_cols + other_cols]
+    other_cols = [c for c in view_df.columns if c not in target_order and c != "年"]
+    year_cols = ["年"] if "年" in view_df.columns else []
+    view_df = view_df[existing_cols + other_cols + year_cols]
 
     honmei_horse = view_df.iloc[0] if not view_df.empty else None
     h_score = safe_int(honmei_horse.get("総合スコア", 0)) if honmei_horse is not None else 0
@@ -2205,6 +2298,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
             top_height = min(300, (len(top_group) + 1) * 35 + 38)
             st.write("🟢 **上位推奨グループ（軸・相手筆頭）**")
+            
             st.dataframe(
                 top_group,
                 column_config=col_config_sum,
@@ -3495,6 +3589,8 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                     "単勝人気", "確定オッズ", "タイム", "上り3F", "勝因・敗因ショートメモ"
                 ] if c in race_df.columns
             ]
+            if "年" in race_df.columns:
+                target_cols.append("年")
             disp_result_df = race_df[target_cols].copy()
 
             def highlight_ranks_view(row):
@@ -3605,6 +3701,8 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
         disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
         disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
+        if "年" in disp_db_df.columns:
+            disp_db_df = disp_db_df[[c for c in disp_db_df.columns if c != "年"] + ["年"]]
 
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
@@ -3637,7 +3735,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                     "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
                     "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
-                    "勝因・敗因ショートメモ", "メモ"
+                    "勝因・敗因ショートメモ", "メモ", "年"
                 ] if c in filtered_df.columns
             ]
             disp_single_df = filtered_df[single_race_cols]
@@ -3685,9 +3783,9 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     c for c in disp_db_df.columns if c not in [
                         "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                         "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
-                        "勝因・敗因ショートメモ", "メモ", "回顧メモ", "軸ヒモ切り", "人気"
+                        "勝因・敗因ショートメモ", "メモ", "回顧メモ", "軸ヒモ切り", "人気", "年"
                     ]
-                ]
+                ] + (["年"] if "年" in disp_db_df.columns else [])
                 disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
 
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
