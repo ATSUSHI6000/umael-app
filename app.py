@@ -1,4 +1,3 @@
-import datetime
 import importlib
 import io
 import json
@@ -7,8 +6,8 @@ import re
 import shutil
 import time
 import unicodedata
-import urllib.parse
 import urllib.request
+import urllib.parse
 from google import genai
 from google.genai import types
 import pandas as pd
@@ -93,11 +92,6 @@ DEFAULT_HOKKAIDO_RULES = """【平場・G2・G3 北海道・洋芝（函館・�
 # 🛠 共通ヘルパー関数・ファイル入出力・正規化定義
 # --------------------------------------------------
 
-def get_current_year_str():
-    """現在の西暦年を文字列で動的に取得（例: "2026", "2027"）"""
-    return datetime.datetime.now().strftime("%Y")
-
-
 def load_saved_rules(file_path, default_text):
     if os.path.exists(file_path):
         try:
@@ -128,13 +122,12 @@ def clean_pop_number(val):
 
 
 def extract_year_from_race_name(race_name):
-    """レース名から西暦4桁（202X）を抽出。判別不能時は現在の西暦年を自動補完"""
     if not race_name:
-        return get_current_year_str()
+        return "2026"
     m = re.search(r"(20\d{2})", str(race_name))
     if m:
         return m.group(1)
-    return get_current_year_str()
+    return "2026"
 
 
 def detect_race_grade(race_name):
@@ -784,8 +777,6 @@ def sanitize_dataframe_columns(df):
 
 
 def migrate_and_clean_all_dbs():
-    current_y = get_current_year_str()
-
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -793,7 +784,7 @@ def migrate_and_clean_all_dbs():
                 clean_df = sanitize_dataframe_columns(root_df)
                 if "年" not in clean_df.columns and "レース名" in clean_df.columns:
                     clean_df["年"] = clean_df["レース名"].apply(extract_year_from_race_name)
-                clean_df["年"] = clean_df["年"].replace({"": current_y, "None": current_y, "nan": current_y, "NaN": current_y})
+                clean_df["年"] = clean_df["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
                 clean_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
         except Exception:
             pass
@@ -810,32 +801,24 @@ def migrate_and_clean_all_dbs():
                             clean_ydf = sanitize_dataframe_columns(ydf)
                             if "年" not in clean_ydf.columns and "レース名" in clean_ydf.columns:
                                 clean_ydf["年"] = clean_ydf["レース名"].apply(extract_year_from_race_name)
-                            clean_ydf["年"] = clean_ydf["年"].replace({"": current_y, "None": current_y, "nan": current_y, "NaN": current_y})
+                            clean_ydf["年"] = clean_ydf["年"].replace({"": "2026", "None": "2026", "nan": "2026", "NaN": "2026"})
                             clean_ydf.to_csv(y_file, index=False, encoding="utf-8-sig")
                     except Exception:
                         pass
 
 
-def load_db(selected_year=None):
-    if selected_year is None:
-        selected_year = f"{get_current_year_str()}年"
-
+def load_db(selected_year="2026年"):
     migrate_and_clean_all_dbs()
 
     all_dfs = []
 
-    # DATA_DIR 内のすべての年度サブフォルダから動的にロード
-    if os.path.exists(DATA_DIR):
-        for entry in os.listdir(DATA_DIR):
-            y_dir = os.path.join(DATA_DIR, entry)
-            if os.path.isdir(y_dir):
-                y_file = os.path.join(y_dir, DB_FILE)
-                if os.path.exists(y_file):
-                    try:
-                        sub_df = pd.read_csv(y_file, dtype=str).fillna("")
-                        all_dfs.append(sub_df)
-                    except Exception:
-                        pass
+    year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
+    if os.path.exists(year_2026_file):
+        try:
+            sub_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
+            all_dfs.append(sub_df)
+        except Exception:
+            pass
 
     if os.path.exists(DB_FILE):
         try:
@@ -843,6 +826,18 @@ def load_db(selected_year=None):
             all_dfs.append(m_df)
         except Exception:
             pass
+
+    if os.path.exists(DATA_DIR):
+        for entry in os.listdir(DATA_DIR):
+            y_dir = os.path.join(DATA_DIR, entry)
+            if os.path.isdir(y_dir) and entry != "2026":
+                y_file = os.path.join(y_dir, DB_FILE)
+                if os.path.exists(y_file):
+                    try:
+                        sub_df = pd.read_csv(y_file, dtype=str).fillna("")
+                        all_dfs.append(sub_df)
+                    except Exception:
+                        pass
 
     if not all_dfs:
         return pd.DataFrame()
@@ -872,7 +867,7 @@ def load_db(selected_year=None):
     elif "年" not in combined.columns and "レース名" in combined.columns:
         combined["年"] = combined["レース名"].apply(extract_year_from_race_name)
     elif "年" not in combined.columns:
-        combined["年"] = get_current_year_str()
+        combined["年"] = "2026"
 
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
@@ -883,12 +878,11 @@ def load_db(selected_year=None):
 
 def get_available_years_in_db():
     df = load_db(selected_year="全期間")
-    current_y_str = get_current_year_str()
     if df.empty or "年" not in df.columns:
-        return [f"{current_y_str}年"]
+        return ["2026年"]
     years = sorted(df["年"].dropna().unique().tolist(), reverse=True)
     formatted = [f"{y}年" for y in years if str(y).isdigit()]
-    return formatted if formatted else [f"{current_y_str}年"]
+    return formatted if formatted else ["2026年"]
 
 
 def save_to_db(new_df):
@@ -903,7 +897,7 @@ def save_to_db(new_df):
 
     year_val = str(clean_save_df["年"].iloc[0]).strip()
     if not year_val or year_val in ["None", "nan"]:
-        year_val = get_current_year_str()
+        year_val = "2026"
 
     # 1. ルート直下 umael_database.csv 保存
     if os.path.exists(DB_FILE):
@@ -919,7 +913,7 @@ def save_to_db(new_df):
     else:
         clean_save_df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-    # 2. data/YYYY/ 年別フォルダを全自動で生成して umael_database.csv を保存
+    # 2. data/YYYY/umael_database.csv 保存
     year_dir = os.path.join(DATA_DIR, year_val)
     os.makedirs(year_dir, exist_ok=True)
     year_db_path = os.path.join(year_dir, DB_FILE)
@@ -938,140 +932,6 @@ def save_to_db(new_df):
         clean_save_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
     return load_db(f"{year_val}年")
-
-
-def bulk_import_to_db(import_df):
-    """スプレッドシートやCSVからの一括データをフォーマットクレンジングして一発保存"""
-    if import_df is None or import_df.empty:
-        return 0, 0
-
-    clean_df = sanitize_dataframe_columns(import_df)
-
-    if "年" not in clean_df.columns:
-        if "レース名" in clean_df.columns:
-            clean_df["年"] = clean_df["レース名"].apply(extract_year_from_race_name)
-        else:
-            clean_df["年"] = get_current_year_str()
-    else:
-        clean_df["年"] = clean_df["年"].fillna("").astype(str)
-        mask_empty = (clean_df["年"] == "") | (clean_df["年"] == "None") | (clean_df["年"] == "nan") | (clean_df["年"] == "NaN")
-        if mask_empty.any() and "レース名" in clean_df.columns:
-            clean_df.loc[mask_empty, "年"] = clean_df.loc[mask_empty, "レース名"].apply(extract_year_from_race_name)
-
-    total_rows = len(clean_df)
-    races_count = 0
-
-    if "レース名" in clean_df.columns:
-        unique_races = clean_df["レース名"].dropna().unique()
-        races_count = len(unique_races)
-        for r_name in unique_races:
-            if not str(r_name).strip():
-                continue
-            sub_r_df = clean_df[clean_df["レース名"] == r_name]
-            save_to_db(sub_r_df)
-    else:
-        save_to_db(clean_df)
-        races_count = 1
-
-    return races_count, total_rows
-
-
-def convert_gsheet_url_to_csv(url):
-    """Googleスプレッドシートの閲覧URLからCSV形式ダウンロードURLへ自動変換"""
-    url = url.strip()
-    m = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
-    if m:
-        sheet_id = m.group(1)
-        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-        gid_m = re.search(r"[#&?]gid=([0-9]+)", url)
-        if gid_m:
-            csv_url += f"&gid={gid_m.group(1)}"
-        return csv_url
-    return url
-
-
-def render_spreadsheet_import_ui():
-    """スプレッドシート（URL / CSVファイル複数一括 / コピペ）一括流し込みUI"""
-    with st.expander("📥 【過去データ復元】スプレッドシート（URL / CSV / コピペ）一括流し込み", expanded=True):
-        st.write("お手元の過去レースCSVファイルやスプレッドシートのデータを、一発でデータベース（ルートおよび年度別フォルダ `data/YYYY/`）に復元・流し込みできます。")
-
-        import_tab1, import_tab2, import_tab3 = st.tabs([
-            "📂 CSVファイルをアップロードして流し込み（複数一括可）",
-            "🔗 GoogleスプレッドシートURLから流し込み",
-            "📋 テキスト（コピペ）から流し込み"
-        ])
-
-        with import_tab1:
-            uploaded_csv_files = st.file_uploader(
-                "過去レースのCSVファイル (.csv / 複数ファイル一括選択可) を選択",
-                type=["csv"],
-                accept_multiple_files=True,
-                key="import_csv_uploader"
-            )
-            if st.button("🚀 CSVファイルから一括流し込み実行", key="btn_import_csv", type="primary"):
-                if not uploaded_csv_files:
-                    st.warning("⚠️ CSVファイルを1つ以上アップロードしてください！")
-                else:
-                    with st.spinner("🏇 CSVファイルを解析し、一括流し込み中..."):
-                        total_races = 0
-                        total_rows = 0
-                        success_files = 0
-                        for uploaded_csv in uploaded_csv_files:
-                            try:
-                                uploaded_csv.seek(0)
-                                imp_df = pd.read_csv(uploaded_csv, dtype=str).fillna("")
-                                r_cnt, row_cnt = bulk_import_to_db(imp_df)
-                                total_races += r_cnt
-                                total_rows += row_cnt
-                                success_files += 1
-                            except Exception as e:
-                                st.error(f"❌ 「{uploaded_csv.name}」の読み込み中にエラーが発生しました: {e}")
-                        
-                        if success_files > 0:
-                            st.success(f"🎉 CSVファイル（{success_files}件）から {total_races} レース分（計 {total_rows} 頭データ）を一括流し込み・復元しました！")
-                            st.rerun()
-
-        with import_tab2:
-            gsheet_url = st.text_input(
-                "Googleスプレッドシートの共有URLを入力",
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0",
-                key="import_gsheet_url_input"
-            )
-            st.caption("※スプレッドシートの共有設定を「リンクを知っている全員」に設定しておいてください。")
-            if st.button("🚀 Googleスプレッドシートから一括流し込み実行", key="btn_import_gsheet", type="primary"):
-                if not gsheet_url.strip():
-                    st.warning("⚠️ スプレッドシートのURLを入力してください！")
-                else:
-                    with st.spinner("🏇 スプレッドシートからデータを取得し、一括流し込み中..."):
-                        try:
-                            csv_export_url = convert_gsheet_url_to_csv(gsheet_url)
-                            imp_df = pd.read_csv(csv_export_url, dtype=str).fillna("")
-                            r_cnt, row_cnt = bulk_import_to_db(imp_df)
-                            st.success(f"🎉 スプレッドシートから {r_cnt} レース分（計 {row_cnt} 頭データ）を一括流し込み・復元しました！")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ スプレッドシートからの読み込み中にエラーが発生しました: {e}\nURLやアクセス権限（リンクを知っている全員に公開）をご確認ください。")
-
-        with import_tab3:
-            raw_paste_text = st.text_area(
-                "スプレッドシートのセルをコピーして直接貼り付け（TSV / CSV）",
-                height=150,
-                placeholder="レース名\t馬番\t馬名\t総合スコア\t評価...\n（表データをそのまま貼ってください）",
-                key="import_paste_text"
-            )
-            if st.button("🚀 貼り付けテキストから一括流し込み実行", key="btn_import_paste", type="primary"):
-                if not raw_paste_text.strip():
-                    st.warning("⚠️ データを貼り付けてください！")
-                else:
-                    with st.spinner("🏇 貼り付けデータを解析し、一括流し込み中..."):
-                        try:
-                            sep = "\t" if "\t" in raw_paste_text else ","
-                            imp_df = pd.read_csv(io.StringIO(raw_paste_text.strip()), sep=sep, dtype=str).fillna("")
-                            r_cnt, row_cnt = bulk_import_to_db(imp_df)
-                            st.success(f"🎉 貼り付けデータから {r_cnt} レース分（計 {row_cnt} 頭データ）を一括流し込み・復元しました！")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 貼り付けデータの読み込み中にエラーが発生しました: {e}")
 
 
 def update_db_with_recap(race_name, result_df, memo_text):
@@ -1119,7 +979,7 @@ def update_db_with_recap(race_name, result_df, memo_text):
 
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
         
-        # 年度サブフォルダにも自動反映
+        # 年度サブフォルダにも反映
         year_val = extract_year_from_race_name(race_name)
         year_db_path = os.path.join(DATA_DIR, year_val, DB_FILE)
         if os.path.exists(year_db_path):
@@ -1214,8 +1074,7 @@ def parse_json_ai_output(result_text):
             if not isinstance(race_data, dict):
                 continue
 
-            default_title = f"{get_current_year_str()}1008_競馬解析_OP"
-            race_title = str(race_data.get("race_name") or default_title).strip()
+            race_title = str(race_data.get("race_name") or "20261008_競馬解析_OP").strip()
             confidence = race_data.get("confidence") or ""
             risk_level = race_data.get("risk_level") or ""
             race_quality_and_tenkai = race_data.get("race_quality_and_tenkai") or ""
@@ -2243,9 +2102,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 )
 
     if is_viewer_mode:
+        # ★共有モード（ビューアー表示）の場合は買い目描画で即座にピタッと終了！チャット・詳細データ表等は完全非表示
         render_summary_body()
         return
 
+    # 管理・通常閲覧モード時のタブ構成
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
     )
@@ -2330,6 +2191,7 @@ st.markdown(
         border-radius: 4px !important;
     }
     
+    /* アクションボタン オレンジ系統一 */
     div.stButton > button,
     button[data-testid="stBaseButton-secondary"],
     button[data-testid="stBaseButton-primary"] {
@@ -2530,9 +2392,6 @@ with st.sidebar:
 # --------------------------------------------------
 
 if selected_menu == "📋 レース分析・予想":
-    render_spreadsheet_import_ui()
-    st.divider()
-
     st.subheader("🎯 解析ルールの選択 ＆ 段階的データ保存")
 
     rule_type = st.radio(
@@ -2807,11 +2666,10 @@ if selected_menu == "📋 レース分析・予想":
                                         by="総合スコア", ascending=False
                                     ).reset_index(drop=True)
 
-                                    default_title = f"{get_current_year_str()}1008_競馬解析_OP"
                                     auto_race_title = (
                                         df["レース名"].iloc[0]
                                         if "レース名" in df.columns
-                                        else default_title
+                                        else "20261008_競馬解析_OP"
                                     )
                                     save_to_db(df)
 
@@ -3534,9 +3392,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 elif selected_menu == "🗄 過去馬データベース（プール）":
     st.subheader("🗄️ 過去馬データベース（プール一覧・レース別閲覧）")
     
-    render_spreadsheet_import_ui()
-    st.divider()
-
     available_years = get_available_years_in_db()
     selected_year = st.selectbox("📅 閲覧する年度を選択してください：", available_years + ["全期間"], index=0, key="db_year_select")
 
