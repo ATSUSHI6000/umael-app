@@ -2445,12 +2445,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                     unsafe_allow_html=True,
                 )
 
-    if is_viewer_mode:
-        # ★共有モード（ビューアー表示）の場合は買い目描画で即座にピタッと終了！チャット・詳細データ表等は完全非表示
-        render_summary_body()
-        return
-
-    # 管理・通常閲覧モード時のタブ構成
+        # 管理・通常閲覧モード時のタブ構成
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
     )
