@@ -2608,6 +2608,7 @@ with st.sidebar:
             "📊 評価データ一覧（プール）",
             "📝 回顧・精度検証一覧（プール）",
             "🗄 過去馬データベース（プール）",
+            "📥 過去CSVデータ取込",
         ],
         index=0,
     )
@@ -3824,3 +3825,75 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             )
     else:
         st.info("💡 まだプールされたデータはありません。")
+
+# --------------------------------------------------
+# 📥 8. 過去CSVデータ取込 メニュー
+# --------------------------------------------------
+
+elif selected_menu == "📥 過去CSVデータ取込":
+    st.subheader("📥 過去CSVデータの一括取り込み・同期")
+    st.write("保存・バックアップしてある過去のCSVファイル（一括DB用CSV、または単一レースCSV）をアップロードして、データベースへ一括インポート・同期保存します。")
+
+    uploaded_csv_files = st.file_uploader(
+        "📂 バックアップCSVファイルを選択（複数ファイル一括選択可能）",
+        type=["csv"],
+        accept_multiple_files=True,
+        key="backup_csv_uploader",
+    )
+
+    if st.button("🚀 過去CSVデータをデータベースへ一括取り込み・同期", use_container_width=True, type="primary"):
+        if not uploaded_csv_files:
+            st.warning("⚠️ インポートするCSVファイルを1つ以上選択してください！")
+        else:
+            with st.spinner("📦 CSVデータを読み込み、データベースに自動クレンジング・割り振り保存中..."):
+                imported_dfs = []
+                failed_files = []
+
+                for csv_file in uploaded_csv_files:
+                    try:
+                        csv_file.seek(0)
+                        try:
+                            df_temp = pd.read_csv(csv_file, dtype=str, encoding="utf-8-sig").fillna("")
+                        except Exception:
+                            csv_file.seek(0)
+                            df_temp = pd.read_csv(csv_file, dtype=str, encoding="cp932").fillna("")
+
+                        if not df_temp.empty and "レース名" in df_temp.columns:
+                            imported_dfs.append(df_temp)
+                        else:
+                            failed_files.append(csv_file.name)
+                    except Exception as e:
+                        failed_files.append(f"{csv_file.name} ({e})")
+
+                if imported_dfs:
+                    try:
+                        combined_import_df = pd.concat(imported_dfs, ignore_index=True, sort=False)
+                        updated_db = save_to_db(combined_import_df)
+
+                        imported_races = (
+                            combined_import_df["レース名"]
+                            .dropna()
+                            .astype(str)
+                            .str.strip()
+                            .unique()
+                            .tolist()
+                        )
+                        imported_races = [r for r in imported_races if r]
+
+                        st.success(
+                            f"🎉 CSVファイルのインポートが完了しました！ (合計 {len(imported_races)} レース分 / {len(combined_import_df)} 件の馬データ)"
+                        )
+
+                        st.markdown("#### 📋 取り込まれた対象レース一覧")
+                        for r_name in imported_races:
+                            st.write(f"・ `{r_name}`")
+
+                        if failed_files:
+                            st.warning(
+                                f"⚠️ 以下のファイルはフォーマット不備または空のためスキップされました: {', '.join(failed_files)}"
+                            )
+
+                    except Exception as e:
+                        st.error(f"❌ データベース統合処理中にエラーが発生しました: {e}")
+                else:
+                    st.error("❌ 有効なCSVデータを取り込めませんでした。ファイルのフォーマットを確認してください。")
