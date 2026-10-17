@@ -5,3 +5,5 @@ pdfplumber
 pypdf
 beautifulsoup4
 youtube-transcript-api
+gspread
+google-auth
