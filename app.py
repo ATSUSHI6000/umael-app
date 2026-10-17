@@ -14,6 +14,11 @@ import pandas as pd
 import pdfplumber
 import pypdf
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+
+# 連携対象の「競馬分析用シート」ID
+SPREADSHEET_ID = "1-WuffPHvbPHcdgb20pV4k9VZG7jeE8RAEhI83a2ScNo"
 
 # ページ基本設定（ウマエルプロ v3.0 完全統合版）
 st.set_page_config(
@@ -1017,44 +1022,108 @@ def migrate_and_clean_all_dbs():
         # DBの読み込み障害でアプリ全体を止めない
         pass
 
+# ==================================================
+# 📊 Googleスプレッドシート自動連携コアロジック（「重賞レース分析」タブ指定版）
+# ==================================================
+
+def get_gspread_client():
+    """Secretsからサービスアカウント情報を取得してgspreadクライアントを生成"""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    try:
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            return gspread.authorize(creds)
+    except Exception:
+        pass
+    return None
+
+def load_db_from_sheet():
+    """Googleスプレッドシートの「重賞レース分析」タブから全データを読み込む"""
+    gc = get_gspread_client()
+    if not gc:
+        return pd.DataFrame()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet("重賞レース分析")
+        data = worksheet.get_all_records()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data).astype(str).fillna("")
+        return sanitize_dataframe_columns(df)
+    except Exception:
+        return pd.DataFrame()
+
+def save_db_to_sheet(df):
+    """Googleスプレッドシートの「重賞レース分析」タブへ全データを同期書き込み（自動クリア＆一括更新）"""
+    gc = get_gspread_client()
+    if not gc or df is None or df.empty:
+        return
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet("重賞レース分析")
+        
+        clean_df = sanitize_dataframe_columns(df)
+        clean_df = clean_df.fillna("").astype(str)
+        
+        # ヘッダー＋データを二次元リスト化して一括書き込み
+        header = clean_df.columns.tolist()
+        values = [header] + clean_df.values.tolist()
+        
+        worksheet.clear()
+        worksheet.update('A1', values)
+    except Exception as e:
+        st.warning(f"⚠️ スプレッドシート同期時に注意: {e}")
+
+
 def load_db(selected_year=None):
     if selected_year is None:
         selected_year = f"{time.strftime('%Y')}年"
     migrate_and_clean_all_dbs()
 
-    all_dfs = []
+    # 1. まずスプレッドシートから最新データを取得
+    sheet_df = load_db_from_sheet()
+    if not sheet_df.empty:
+        combined = sheet_df
+    else:
+        # スプレッドシートが空の場合はローカルCSV群から取得
+        all_dfs = []
 
-    year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
-    if os.path.exists(year_2026_file):
-        try:
-            sub_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
-            all_dfs.append(sub_df)
-        except Exception:
-            pass
+        year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
+        if os.path.exists(year_2026_file):
+            try:
+                sub_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
+                all_dfs.append(sub_df)
+            except Exception:
+                pass
 
-    if os.path.exists(DB_FILE):
-        try:
-            m_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
-            all_dfs.append(m_df)
-        except Exception:
-            pass
+        if os.path.exists(DB_FILE):
+            try:
+                m_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+                all_dfs.append(m_df)
+            except Exception:
+                pass
 
-    if os.path.exists(DATA_DIR):
-        for entry in os.listdir(DATA_DIR):
-            y_dir = os.path.join(DATA_DIR, entry)
-            if os.path.isdir(y_dir) and entry != "2026":
-                y_file = os.path.join(y_dir, DB_FILE)
-                if os.path.exists(y_file):
-                    try:
-                        sub_df = pd.read_csv(y_file, dtype=str).fillna("")
-                        all_dfs.append(sub_df)
-                    except Exception:
-                        pass
+        if os.path.exists(DATA_DIR):
+            for entry in os.listdir(DATA_DIR):
+                y_dir = os.path.join(DATA_DIR, entry)
+                if os.path.isdir(y_dir) and entry != "2026":
+                    y_file = os.path.join(y_dir, DB_FILE)
+                    if os.path.exists(y_file):
+                        try:
+                            sub_df = pd.read_csv(y_file, dtype=str).fillna("")
+                            all_dfs.append(sub_df)
+                        except Exception:
+                            pass
 
-    if not all_dfs:
-        return pd.DataFrame()
+        if not all_dfs:
+            return pd.DataFrame()
 
-    combined = pd.concat(all_dfs, ignore_index=True)
+        combined = pd.concat(all_dfs, ignore_index=True)
+
     combined = combined.replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
     if "レース名" in combined.columns:
@@ -1084,6 +1153,32 @@ def load_db(selected_year=None):
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
         combined = combined[combined["年"].astype(str) == target_y].reset_index(drop=True)
+
+    return combined
+
+def save_to_db(new_df):
+    if new_df is None or new_df.empty:
+        return load_db()
+
+    clean_save_df = sanitize_dataframe_columns(new_df)
+    if "レース名" not in clean_save_df.columns:
+        return load_db("全期間")
+
+    # 1. 既存データベースと新規データの統合（重複レースの差し替え）
+    current_db = load_db(selected_year="全期間")
+    save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
+    
+    if not current_db.empty and "レース名" in current_db.columns:
+        current_db = current_db[~current_db["レース名"].astype(str).str.strip().isin(save_races)]
+    
+    combined = pd.concat([current_db, clean_save_df], ignore_index=True, sort=False)
+    combined = sanitize_dataframe_columns(combined)
+    
+    # 2. ローカルCSVへ保存
+    combined.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+
+    # 3. Googleスプレッドシートの「重賞レース分析」タブへ自動同期書き込み（★ここが永久保存！）
+    save_db_to_sheet(combined)
 
     return combined
 
