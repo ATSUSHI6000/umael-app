@@ -1110,28 +1110,27 @@ def save_db_to_sheet(df):
         clean_df = clean_df.fillna("").astype(str)
         
         # 1. 現在スプレッドシートに入力されている全行を取得
-        existing_rows = worksheet.get_all_values()
+        all_rows = worksheet.get_all_values()
+        # 中身が入っている行があるかチェック
+        non_empty_rows = [row for row in all_rows if any(cell.strip() for cell in row)]
         
         header = clean_df.columns.tolist()
         new_data = clean_df.values.tolist()
         
         # シートが完全に空の場合（初回の書き込み）
-        if not existing_rows or len(existing_rows) == 0:
+        if not non_empty_rows:
             values_to_write = [header] + new_data
-            worksheet.update(values_to_write)
-            st.toast("✅ スプレッドシートへ新規データを書き込みました！")
+            # 'A1' からヘッダー付きで書き込み
+            worksheet.update('A1', values_to_write)
+            st.toast("✅ 新しい「重賞レース分析」シートへ全データを書き込みました！")
         else:
             # すでに入力済みデータがある場合
-            # 1行の空行（空データ）を用意
             empty_row = [""] * len(header)
-            
-            # 空行 ＋ 今回の追加データ（ヘッダーなし）
             values_to_write = [empty_row] + new_data
             
-            # 既存データの「次の行」のA列（例：すでに10行あれば A11 ）から書き込み
-            next_start_row = len(existing_rows) + 1
+            # 最終行の次の行から追記
+            next_start_row = len(all_rows) + 1
             worksheet.update(f"A{next_start_row}", values_to_write)
-            
             st.toast(f"✅ 入力済みデータの末尾（{next_start_row + 1}行目〜）に1行空けて追記完了しました！")
 
     except Exception as e:
