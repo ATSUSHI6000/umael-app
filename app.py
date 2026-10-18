@@ -1093,13 +1093,16 @@ def load_db_from_sheet():
     except Exception:
         return pd.DataFrame()
 
+import traceback
+
 def save_db_to_sheet(df):
     """Googleスプレッドシートの既存データの末尾に1行空けて追記書き込み"""
     gc = get_gspread_client()
     if not gc:
-        st.error("⚠️ Googleスプレッドシートへの接続認証に失敗しました。")
+        st.error("⚠️ Googleスプレッドシートへの接続認証（gspread）に失敗しました。Secretsの設定を確認してください。")
         return
     if df is None or df.empty:
+        st.warning("⚠️ 送信するデータが空（Empty）です。")
         return
 
     try:
@@ -1111,7 +1114,6 @@ def save_db_to_sheet(df):
         
         # 1. 現在スプレッドシートに入力されている全行を取得
         all_rows = worksheet.get_all_values()
-        # 中身が入っている行があるかチェック
         non_empty_rows = [row for row in all_rows if any(cell.strip() for cell in row)]
         
         header = clean_df.columns.tolist()
@@ -1120,21 +1122,20 @@ def save_db_to_sheet(df):
         # シートが完全に空の場合（初回の書き込み）
         if not non_empty_rows:
             values_to_write = [header] + new_data
-            # 'A1' からヘッダー付きで書き込み
             worksheet.update('A1', values_to_write)
             st.toast("✅ 新しい「重賞レース分析」シートへ全データを書き込みました！")
         else:
-            # すでに入力済みデータがある場合
             empty_row = [""] * len(header)
             values_to_write = [empty_row] + new_data
             
-            # 最終行の次の行から追記
             next_start_row = len(all_rows) + 1
             worksheet.update(f"A{next_start_row}", values_to_write)
             st.toast(f"✅ 入力済みデータの末尾（{next_start_row + 1}行目〜）に1行空けて追記完了しました！")
 
     except Exception as e:
-        st.error(f"❌ スプレッドシート同期エラー: {e}")
+        # エラーの具体的な内容を画面上に赤文字でそのまま吐き出す！
+        st.error(f"❌ スプレッドシート同期エラーが発生しました！")
+        st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレース】:\n{traceback.format_exc()}")
 
 
 def load_db(selected_year=None):
