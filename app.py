@@ -641,19 +641,34 @@ def normalize_rank(val):
 
 
 def convert_to_circled_numbers(text):
-    """馬番の数字を丸数字（①〜⑳）に変換する（金額などの『〜円』部分は保護する）"""
+    """馬番の数字のみを丸数字（①〜⑳）に変換する（金額、点数、頭数、券種名などの単位付き数字は保護する）"""
     if not text or not isinstance(text, str):
         return text
 
-    # 1. 『3,000円』『2500円』などの金額表記を一時的に退避（保護）
-    money_tokens = []
+    import string
 
-    def save_money(match):
-        money_tokens.append(match.group(0))
-        return f"__MONEY_TOKEN_{len(money_tokens) - 1}__"
+    # 1. 退避対象（金額、点数、頭数、券種名など）を保護
+    tokens = {}
 
-    # カンマ付き数字＋円、または純粋な数字＋円を保護
-    protected_text = re.sub(r'[\d,]+(?:\s*円)', save_money, text)
+    def generate_token_key(index):
+        # トークン名に数字を使わずアルファベットのみで生成（二重変換事故を100%防止）
+        chars = string.ascii_uppercase
+        result = ""
+        while True:
+            result = chars[index % 26] + result
+            index = index // 26 - 1
+            if index < 0:
+                break
+        return f"__PROTECTED_TOKEN_{result}__"
+
+    def save_protected(match):
+        key = generate_token_key(len(tokens))
+        tokens[key] = match.group(0)
+        return key
+
+    # 保護対象パターン：金額(〜円)、点数(〜点)、頭数(〜頭)、券種名(3連複/3連単など)、着順(1着〜)
+    pattern = r'[\d,]+\s*円|\d+\s*点|\d+\s*頭|[1-3]\s*連[複単]|[1-3]\s*着'
+    protected_text = re.sub(pattern, save_protected, text)
 
     # 2. 1〜20の数字を丸数字に変換するマップ
     circled_map = {
@@ -663,16 +678,15 @@ def convert_to_circled_numbers(text):
         "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳"
     }
 
-    # 2桁の数字（10〜20）から優先的に丸数字へ置換
+    # 20から1まで大きい順に丸数字置換（馬番のみ対象）
     for num in range(20, 0, -1):
         s_num = str(num)
         if s_num in circled_map:
-            # 単語境界やハイフン・記号等で挟まれた数字を対象に置換
             protected_text = re.sub(rf'(?<!\d){s_num}(?!\d)', circled_map[s_num], protected_text)
 
-    # 3. 退避させていた金額表記を元に戻す
-    for idx, money_str in enumerate(money_tokens):
-        protected_text = protected_text.replace(f"__MONEY_TOKEN_{idx}__", money_str)
+    # 3. 退避させていた保護文字列（金額や単位）を元に戻す
+    for key, original_val in tokens.items():
+        protected_text = protected_text.replace(key, original_val)
 
     return protected_text
 
