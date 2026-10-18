@@ -1843,38 +1843,15 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
                         if not has_changes:
                             st.info(f"ℹ️ **【現状維持】** {summary_msg}")
                         else:
-                            st.success(f"✨ **【評価・見解・買い目に修正あり】**\n\n{summary_msg}")
-                            
                             updated_df = parse_json_ai_output(raw_json)
                             if not updated_df.empty:
-                                st.session_state["temp_updated_df"] = updated_df
-                                
-                                st.markdown("#### 📌 修正後の展開見解・買い目プレビュー")
-                                if "レース質展開予想" in updated_df.columns and str(updated_df["レース質展開予想"].iloc[0]).strip():
-                                    st.caption("🏁 **【修正後のレース質・展開予想】**")
-                                    st.info(updated_df["レース質展開予想"].iloc[0])
-                                
-                                if "推奨買い目" in updated_df.columns and str(updated_df["推奨買い目"].iloc[0]).strip():
-                                    st.caption("💡 **【修正後の推奨買い目】**")
-                                    raw_tkts = updated_df["推奨買い目"].iloc[0]
-                                    try:
-                                        tkts = json.loads(raw_tkts)
-                                        for tk in tkts:
-                                            st.write(f"・{tk}")
-                                    except Exception:
-                                        st.write(raw_tkts)
-
-                                st.markdown("#### 📊 修正後の馬別スコア一覧")
-                                st.dataframe(
-                                    updated_df[["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ","年"]],
-                                    use_container_width=True
-                                )
-
-                                if st.button("💾 この微調整後の評価データで上書き保存する", type="primary"):
-                                    save_to_db(updated_df)
-                                    st.session_state["analyzed_df"] = updated_df
-                                    st.success("🎉 データベースの評価・見解・買い目データを最新の修正版で更新しました！")
-                                    st.rerun()
+                                # 1. データベース（スプレッドシート/ローカルDB）を最新版で上書き保存
+                                save_to_db(updated_df)
+                                # 2. メイン画面で参照している分析データフレームを即座に更新
+                                st.session_state["analyzed_df"] = updated_df
+                                st.success(f"🎉 **【直前データを反映完了】**\n\n{summary_msg}")
+                                # 3. 画面をリロードして、メイン画面の総合スコア・印・全テーブル・買い目・見解を最新化
+                                st.rerun()
 
                     except Exception as e:
                         st.error(f"❌ 再評価処理中にエラーが発生しました: {e}")
