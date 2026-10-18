@@ -3815,6 +3815,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         all_races_in_db = (
             db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
         )
+        # デフォルトで「🌐 すべてのレース（全件一括表示）」を先頭＆インデックス0に設定
         race_selector_options = ["🌐 すべてのレース（全件一括表示）"] + all_races_in_db
 
         selected_db_race = st.selectbox(
@@ -3828,8 +3829,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
         disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
         disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
-        if "年" in disp_db_df.columns:
-            disp_db_df = disp_db_df[[c for c in disp_db_df.columns if c != "年"] + ["年"]]
 
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
@@ -3852,32 +3851,37 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
 
+        # --------------------------------------------------
+        # 1. 特定レース選択時
+        # --------------------------------------------------
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
             
             st.markdown(f"### 🏇 【{selected_db_race}】 解析データ（出走頭数: {len(filtered_df)}頭）")
 
-            # 横長テーブルに含めるカラム順序（展開予想・買い目・回顧メモもすべて網羅）
             single_race_cols = [
                 c for c in [
                     "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
                     "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
                     "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
-                    "勝因・敗因ショートメモ", "メモ", "レース質展開予想", "推奨買い目", "回顧メモ", "年"
+                    "勝因・敗因ショートメモ", "メモ", "レース質展開予想", "推奨買い目", "回顧メモ",
+                    "レース名", "信頼度", "波乱度"
                 ] if c in filtered_df.columns
             ]
             
-            # リストに含まれていないその他のカラムがあれば末尾に追加
-            extra_cols = [c for c in filtered_df.columns if c not in single_race_cols and c not in ["軸ヒモ切り", "人気"]]
+            # その他の未指定カラムを抽出（「年」は除外）
+            extra_cols = [c for c in filtered_df.columns if c not in single_race_cols and c != "年"]
+            
+            # 最後に「年」を一番右端に確実にセット
             final_cols = single_race_cols + extra_cols
+            if "年" in filtered_df.columns:
+                final_cols.append("年")
 
             disp_single_df = filtered_df[final_cols]
             disp_single_df = disp_single_df[disp_single_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
 
-            # 全頭が隠れずに見やすいよう高さを自動調整（頭数×行高）
             calc_db_single_height = min(800, (len(disp_single_df) + 1) * 38 + 40)
 
-            # 横長テーブル（全データ含み）の描画
             st.dataframe(
                 disp_single_df.style.apply(db_highlight_ranks, axis=1),
                 column_config=db_col_config,
@@ -3888,7 +3892,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
             st.divider()
 
-            # CSVダウンロードボタン
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 single_csv_data = filtered_df.to_csv(index=False, encoding="utf-8-sig")
@@ -3908,6 +3911,65 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     mime="text/csv",
                     use_container_width=True,
                 )
+
+        # --------------------------------------------------
+        # 2. 🌐 すべてのレース（全件一括表示）※デフォルト表示
+        # --------------------------------------------------
+        else:
+            st.markdown("### 🌐 プール済み全レース・全頭一覧")
+            
+            cols_order = [
+                c for c in [
+                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
+                    "勝因・敗因ショートメモ", "メモ", "レース質展開予想", "推奨買い目", "回顧メモ",
+                    "信頼度", "波乱度"
+                ] if c in disp_db_df.columns
+            ]
+            
+            extra_all_cols = [c for c in disp_db_df.columns if c not in cols_order and c != "年"]
+            
+            # 最後に「年」を一番右端に確実にセット
+            final_all_cols = cols_order + extra_all_cols
+            if "年" in disp_db_df.columns:
+                final_all_cols.append("年")
+
+            disp_db_df = disp_db_df.reindex(columns=final_all_cols)
+
+            search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
+            if search_race:
+                mask = (
+                    disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) |
+                    disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
+                )
+                filtered_all_df = disp_db_df[mask]
+                filtered_all_df = filtered_all_df[filtered_all_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+                calc_all_height = min(800, (len(filtered_all_df) + 1) * 38 + 40)
+                st.dataframe(
+                    filtered_all_df.style.apply(db_highlight_ranks, axis=1),
+                    column_config=db_col_config,
+                    use_container_width=True,
+                    height=calc_all_height,
+                    hide_index=True,
+                )
+            else:
+                disp_db_df = disp_db_df[disp_db_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+                calc_all_height = min(800, (len(disp_db_df) + 1) * 38 + 40)
+                st.dataframe(
+                    disp_db_df.style.apply(db_highlight_ranks, axis=1),
+                    column_config=db_col_config,
+                    use_container_width=True,
+                    height=calc_all_height,
+                    hide_index=True,
+                )
+
+            csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📦 データベースをCSVで一括ダウンロード",
+                data=csv_data,
+                file_name="race_all_database.csv",
+                mime="text/csv",
+            )
     else:
         st.info("💡 まだプールされたデータはありません。")
 
