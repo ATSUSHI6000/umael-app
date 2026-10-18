@@ -3878,6 +3878,61 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 hide_index=True,
             )
 
+            # --------------------------------------------------
+            # 💡 レース質展開予想・推奨買い目・回顧メモのカード表示エリア
+            # --------------------------------------------------
+            # 1. 🏁 レース質 ＆ 展開予想シミュレーション
+            if "レース質展開予想" in filtered_df.columns and str(filtered_df["レース質展開予想"].iloc[0]).strip():
+                tenkai_text = str(filtered_df["レース質展開予想"].iloc[0]).strip()
+                st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
+                st.markdown(
+                    f"""
+                    <div style="background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);">
+{tenkai_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            # 2. 💡 推奨買い目フォーメーション
+            if "推奨買い目" in filtered_df.columns and str(filtered_df["推奨買い目"].iloc[0]).strip():
+                raw_tickets = str(filtered_df["推奨買い目"].iloc[0]).strip()
+                tickets_list = []
+                try:
+                    tickets_list = json.loads(raw_tickets)
+                except Exception:
+                    tickets_list = [raw_tickets]
+
+                if tickets_list:
+                    st.subheader("💡 推奨買い目フォーメーション")
+                    for t_item in tickets_list:
+                        clean_t = re.sub(r"<[^>]+>", "", str(t_item)).strip()
+                        if clean_t:
+                            circled_t = convert_to_circled_numbers(clean_t)
+                            st.markdown(
+                                f"""
+                                <div class="kaime-card-item">
+                                    📌 <b>{circled_t}</b>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+            # 3. 📝 詳細レース回顧・長文見解
+            if "回顧メモ" in filtered_df.columns and str(filtered_df["回顧メモ"].iloc[0]).strip():
+                kaiko_text = str(filtered_df["回顧メモ"].iloc[0]).strip()
+                st.subheader("📝 詳細レース回顧・長文見解")
+                st.markdown(
+                    f"""
+                    <div style="background-color: #0f172a; border: 2px solid #10b981; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem;">
+{kaiko_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.divider()
+
             dl_col1, dl_col2 = st.columns(2)
             with dl_col1:
                 single_csv_data = filtered_df.to_csv(index=False, encoding="utf-8-sig")
@@ -3897,58 +3952,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     mime="text/csv",
                     use_container_width=True,
                 )
-
-        else:
-            st.markdown("### 🌐 プール済み全レース・全頭一覧")
-            
-            if "確定着順" in disp_db_df.columns:
-                cols_order = [
-                    "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                    "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
-                    "勝因・敗因ショートメモ", "メモ"
-                ] + [
-                    c for c in disp_db_df.columns if c not in [
-                        "レース名", "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                        "軸", "ヒモ", "注", "切り", "単勝人気", "確定オッズ", "タイム", "上り3F",
-                        "勝因・敗因ショートメモ", "メモ", "回顧メモ", "軸ヒモ切り", "人気", "年"
-                    ]
-                ] + (["年"] if "年" in disp_db_df.columns else [])
-                disp_db_df = disp_db_df.reindex(columns=[c for c in cols_order if c in disp_db_df.columns])
-
-            search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
-            if search_race:
-                mask = (
-                    disp_db_df["レース名"].astype(str).str.contains(search_race, na=False) |
-                    disp_db_df["馬名"].astype(str).str.contains(search_race, na=False)
-                )
-                filtered_all_df = disp_db_df[mask]
-                filtered_all_df = filtered_all_df[filtered_all_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
-                calc_all_height = min(600, (len(filtered_all_df) + 1) * 35 + 38)
-                st.dataframe(
-                    filtered_all_df.style.apply(db_highlight_ranks, axis=1),
-                    column_config=db_col_config,
-                    use_container_width=True,
-                    height=calc_all_height,
-                    hide_index=True,
-                )
-            else:
-                disp_db_df = disp_db_df[disp_db_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
-                calc_all_height = min(600, (len(disp_db_df) + 1) * 35 + 38)
-                st.dataframe(
-                    disp_db_df.style.apply(db_highlight_ranks, axis=1),
-                    column_config=db_col_config,
-                    use_container_width=True,
-                    height=calc_all_height,
-                    hide_index=True,
-                )
-
-            csv_data = db_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="📦 データベースをCSVで一括ダウンロード",
-                data=csv_data,
-                file_name="race_all_database.csv",
-                mime="text/csv",
-            )
     else:
         st.info("💡 まだプールされたデータはありません。")
 
