@@ -1096,8 +1096,12 @@ def load_db_from_sheet():
 def save_db_to_sheet(df):
     """Googleスプレッドシートの「重賞レース分析」タブへ全データを同期書き込み（自動クリア＆一括更新）"""
     gc = get_gspread_client()
-    if not gc or df is None or df.empty:
+    if not gc:
+        st.error("⚠️ Googleスプレッドシートへの接続認証（get_gspread_client）に失敗しました。Streamlit CloudのSecrets設定をご確認ください。")
         return
+    if df is None or df.empty:
+        return
+
     try:
         sh = gc.open_by_key(SPREADSHEET_ID)
         worksheet = sh.worksheet("重賞レース分析")
@@ -1110,9 +1114,12 @@ def save_db_to_sheet(df):
         values = [header] + clean_df.values.tolist()
         
         worksheet.clear()
-        worksheet.update('A1', values)
+        # gspreadのバージョン互換を保った確実な書き込み
+        worksheet.update(values)
+        st.toast("✅ Googleスプレッドシートに全データを同期完了しました！")
+
     except Exception as e:
-        st.warning(f"⚠️ スプレッドシート同期時に注意: {e}")
+        st.error(f"❌ スプレッドシート同期エラー: {e}")
 
 
 def load_db(selected_year=None):
