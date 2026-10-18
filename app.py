@@ -1094,10 +1094,10 @@ def load_db_from_sheet():
         return pd.DataFrame()
 
 def save_db_to_sheet(df):
-    """Googleスプレッドシートの「重賞レース分析」タブへ全データを同期書き込み（自動クリア＆一括更新）"""
+    """Googleスプレッドシートの既存データの末尾に1行空けて追記書き込み"""
     gc = get_gspread_client()
     if not gc:
-        st.error("⚠️ Googleスプレッドシートへの接続認証（get_gspread_client）に失敗しました。Streamlit CloudのSecrets設定をご確認ください。")
+        st.error("⚠️ Googleスプレッドシートへの接続認証に失敗しました。")
         return
     if df is None or df.empty:
         return
@@ -1109,14 +1109,30 @@ def save_db_to_sheet(df):
         clean_df = sanitize_dataframe_columns(df)
         clean_df = clean_df.fillna("").astype(str)
         
-        # ヘッダー＋データを二次元リスト化して一括書き込み
-        header = clean_df.columns.tolist()
-        values = [header] + clean_df.values.tolist()
+        # 1. 現在スプレッドシートに入力されている全行を取得
+        existing_rows = worksheet.get_all_values()
         
-        worksheet.clear()
-        # gspreadのバージョン互換を保った確実な書き込み
-        worksheet.update(values)
-        st.toast("✅ Googleスプレッドシートに全データを同期完了しました！")
+        header = clean_df.columns.tolist()
+        new_data = clean_df.values.tolist()
+        
+        # シートが完全に空の場合（初回の書き込み）
+        if not existing_rows or len(existing_rows) == 0:
+            values_to_write = [header] + new_data
+            worksheet.update(values_to_write)
+            st.toast("✅ スプレッドシートへ新規データを書き込みました！")
+        else:
+            # すでに入力済みデータがある場合
+            # 1行の空行（空データ）を用意
+            empty_row = [""] * len(header)
+            
+            # 空行 ＋ 今回の追加データ（ヘッダーなし）
+            values_to_write = [empty_row] + new_data
+            
+            # 既存データの「次の行」のA列（例：すでに10行あれば A11 ）から書き込み
+            next_start_row = len(existing_rows) + 1
+            worksheet.update(f"A{next_start_row}", values_to_write)
+            
+            st.toast(f"✅ 入力済みデータの末尾（{next_start_row + 1}行目〜）に1行空けて追記完了しました！")
 
     except Exception as e:
         st.error(f"❌ スプレッドシート同期エラー: {e}")
