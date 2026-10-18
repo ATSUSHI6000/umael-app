@@ -641,18 +641,40 @@ def normalize_rank(val):
 
 
 def convert_to_circled_numbers(text):
+    """馬番の数字を丸数字（①〜⑳）に変換する（金額などの『〜円』部分は保護する）"""
+    if not text or not isinstance(text, str):
+        return text
+
+    # 1. 『3,000円』『2500円』などの金額表記を一時的に退避（保護）
+    money_tokens = []
+
+    def save_money(match):
+        money_tokens.append(match.group(0))
+        return f"__MONEY_TOKEN_{len(money_tokens) - 1}__"
+
+    # カンマ付き数字＋円、または純粋な数字＋円を保護
+    protected_text = re.sub(r'[\d,]+(?:\s*円)', save_money, text)
+
+    # 2. 1〜20の数字を丸数字に変換するマップ
     circled_map = {
         "1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤",
         "6": "⑥", "7": "⑦", "8": "⑧", "9": "⑨", "10": "⑩",
         "11": "⑪", "12": "⑫", "13": "⑬", "14": "⑭", "15": "⑮",
-        "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳",
+        "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳"
     }
 
-    def replacer(match):
-        val = match.group(0)
-        return circled_map.get(val, val)
+    # 2桁の数字（10〜20）から優先的に丸数字へ置換
+    for num in range(20, 0, -1):
+        s_num = str(num)
+        if s_num in circled_map:
+            # 単語境界やハイフン・記号等で挟まれた数字を対象に置換
+            protected_text = re.sub(rf'(?<!\d){s_num}(?!\d)', circled_map[s_num], protected_text)
 
-    return re.sub(r"\b(20|1[0-9]|[1-9])\b", replacer, str(text))
+    # 3. 退避させていた金額表記を元に戻す
+    for idx, money_str in enumerate(money_tokens):
+        protected_text = protected_text.replace(f"__MONEY_TOKEN_{idx}__", money_str)
+
+    return protected_text
 
 
 def safe_int(val, default=0):
@@ -3419,7 +3441,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                             "1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
                             "確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ\n\n"
                             "※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。\n\n"
-                            "2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・プロの長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：\n\n"
+                            "2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：\n\n"
                             "   📌 1. 【レース全体の展開 ＆ 馬場・ペース振り返り】\n"
                             "   ・スタートから道中のペース（ハイ・ミドル・スロー）とトラックバイアス（内外・前後有利）の分析\n"
                             "   ・事前予想の展開シミュレーションとの合致点・乖離点の検証\n\n"
@@ -3549,7 +3571,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                             hide_index=True,
                         )
 
-                        st.subheader("📝 詳細レース回顧・プロの長文見解")
+                        st.subheader("📝 詳細レース回顧・長文見解")
                         st.markdown(
                             f"""
                             <div class="recap-box">
