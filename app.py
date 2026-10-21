@@ -1096,7 +1096,9 @@ def load_db_from_sheet():
 import traceback
 
 def save_db_to_sheet(df):
-    """Googleスプレッドシートの既存データの末尾に1行空けて追記書き込み"""
+    """
+    スプレッドシートへの保存処理（重複防止・同一レース自動上書き＆改行1行化機能付き）
+    """
     gc = get_gspread_client()
     if not gc:
         st.error("⚠️ Googleスプレッドシートへの接続認証（gspread）に失敗しました。Secretsの設定を確認してください。")
@@ -1109,31 +1111,47 @@ def save_db_to_sheet(df):
         sh = gc.open_by_key(SPREADSHEET_ID)
         worksheet = sh.worksheet("重賞レース分析")
         
+        # 1. データの整形＆改行除去（スプレッドシートの行間が縦に広がるのを防止）
         clean_df = sanitize_dataframe_columns(df)
         clean_df = clean_df.fillna("").astype(str)
-        
-        # 1. 現在スプレッドシートに入力されている全行を取得
-        all_rows = worksheet.get_all_values()
-        non_empty_rows = [row for row in all_rows if any(cell.strip() for cell in row)]
-        
-        header = clean_df.columns.tolist()
-        new_data = clean_df.values.tolist()
-        
-        # シートが完全に空の場合（初回の書き込み）
-        if not non_empty_rows:
-            values_to_write = [header] + new_data
-            worksheet.update('A1', values_to_write)
-            st.toast("✅ 新しい「重賞レース分析」シートへ全データを書き込みました！")
-        else:
-            empty_row = [""] * len(header)
-            values_to_write = [empty_row] + new_data
+        for col in clean_df.columns:
+            clean_df[col] = clean_df[col].str.replace('\r\n', ' / ').str.replace('\n', ' / ')
             
-            next_start_row = len(all_rows) + 1
-            worksheet.update(f"A{next_start_row}", values_to_write)
-            st.toast(f"✅ 入力済みデータの末尾（{next_start_row + 1}行目〜）に1行空けて追記完了しました！")
+        # 2. スプレッドシートの既存データを全取得
+        all_values = worksheet.get_all_values()
+        
+        # シートが完全に空、またはヘッダーのみの場合（初回の書き込み）
+        if not all_values or len(all_values) <= 1:
+            header = clean_df.columns.tolist()
+            new_data = clean_df.values.tolist()
+            worksheet.update('A1', [header] + new_data)
+            st.toast("✅ 「重賞レース分析」シートへ全データを新規保存しました！")
+            return
+
+        # 3. 既存データをDataFrame化して重複チェック準備
+        existing_df = pd.DataFrame(all_values[1:], columns=all_values[0])
+        
+        # 今回送信するレース名を取得（例: ['秋華賞'] や ['スワンS'] など）
+        incoming_races = clean_df["レース名"].dropna().unique().tolist()
+        
+        # 4. 既存データから「今回送信するレース」の古いデータを自動削除（上書き準備）
+        if "レース名" in existing_df.columns:
+            filtered_df = existing_df[~existing_df["レース名"].isin(incoming_races)]
+        else:
+            filtered_df = existing_df
+        
+        # 5. 残った既存データと今回送信する最新データを合体
+        updated_df = pd.concat([filtered_df, clean_df], ignore_index=True)
+        
+        # 6. シートをクリアして綺麗に整列した最新データで上書き！
+        worksheet.clear()
+        updated_values = [updated_df.columns.tolist()] + updated_df.values.tolist()
+        worksheet.update('A1', updated_values)
+        
+        races_str = ", ".join(incoming_races)
+        st.toast(f"✅ 【重複防止・上書き完了】 '{races_str}' のデータを保存しました！")
 
     except Exception as e:
-        # エラーの具体的な内容を画面上に赤文字でそのまま吐き出す！
         st.error(f"❌ スプレッドシート同期エラーが発生しました！")
         st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレース】:\n{traceback.format_exc()}")
 
