@@ -6790,12 +6790,6 @@ with st.sidebar:
 
     with st.expander("⚙️ システム設定", expanded=False):
         saved_key = load_api_key()
-        api_key = st.text_input(
-            "Gemini API Key",
-            value=saved_key,
-            type="password",
-            help="入力すると自動で保存され、次回から自動ロードされます",
-        )
 
         if api_key and api_key != saved_key:
             save_api_key(api_key)
