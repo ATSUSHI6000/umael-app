@@ -2506,22 +2506,26 @@ if selected_theme == "ライトモード":
     }
 
     /* ライトモード時の設定（Popover）ボタン：白背景・黒文字・ホバーでグレー */
-    div[data-testid="stPopover"] > button {
+    html body div[data-testid="stPopover"] button,
+    html body button[data-testid="stPopoverButton"] {
         background-color: #ffffff !important;
         background: #ffffff !important;
         color: #111827 !important;
         border: 1px solid #d1d5db !important;
     }
-    div[data-testid="stPopover"] > button * {
+    html body div[data-testid="stPopover"] button *,
+    html body button[data-testid="stPopoverButton"] * {
         color: #111827 !important;
     }
-    div[data-testid="stPopover"] > button:hover {
+    html body div[data-testid="stPopover"] button:hover,
+    html body button[data-testid="stPopoverButton"]:hover {
         background-color: #e5e7eb !important;
         background: #e5e7eb !important;
         color: #111827 !important;
         border-color: #d1d5db !important;
     }
-    div[data-testid="stPopover"] > button:hover * {
+    html body div[data-testid="stPopover"] button:hover *,
+    html body button[data-testid="stPopoverButton"]:hover * {
         color: #111827 !important;
     }
 
@@ -2542,20 +2546,24 @@ elif selected_theme == "システムに合わせる":
         [data-testid="stWidgetLabel"] p, label p, label span { color: #111827 !important; font-weight: 700 !important; }
         h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #111827 !important; font-weight: 800 !important; }
         div[data-testid="stRadio"] label p, div[data-testid="stRadio"] label span { color: #111827 !important; }
-        div[data-testid="stPopover"] > button {
+        html body div[data-testid="stPopover"] button,
+        html body button[data-testid="stPopoverButton"] {
             background-color: #ffffff !important;
             background: #ffffff !important;
             color: #111827 !important;
             border: 1px solid #d1d5db !important;
         }
-        div[data-testid="stPopover"] > button * { color: #111827 !important; }
-        div[data-testid="stPopover"] > button:hover {
+        html body div[data-testid="stPopover"] button *,
+        html body button[data-testid="stPopoverButton"] * { color: #111827 !important; }
+        html body div[data-testid="stPopover"] button:hover,
+        html body button[data-testid="stPopoverButton"]:hover {
             background-color: #e5e7eb !important;
             background: #e5e7eb !important;
             color: #111827 !important;
             border-color: #d1d5db !important;
         }
-        div[data-testid="stPopover"] > button:hover * { color: #111827 !important; }
+        html body div[data-testid="stPopover"] button:hover *,
+        html body button[data-testid="stPopoverButton"]:hover * { color: #111827 !important; }
         .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #111827 !important; }
         .card-title, .card-horse-name { color: #111827 !important; }
         .kaime-card-item, .recap-box { background: #ffffff !important; color: #111827 !important; }
@@ -2565,20 +2573,24 @@ elif selected_theme == "システムに合わせる":
         [data-testid="stWidgetLabel"] p, label p, label span { color: #ffffff !important; font-weight: 600 !important; }
         h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #ffffff !important; font-weight: 800 !important; }
         div[data-testid="stRadio"] label p, div[data-testid="stRadio"] label span { color: #ffffff !important; }
-        div[data-testid="stPopover"] > button {
+        html body div[data-testid="stPopover"] button,
+        html body button[data-testid="stPopoverButton"] {
             background-color: #262730 !important;
             background: #262730 !important;
             color: #ffffff !important;
             border: 1px solid #4b5563 !important;
         }
-        div[data-testid="stPopover"] > button * { color: #ffffff !important; }
-        div[data-testid="stPopover"] > button:hover {
+        html body div[data-testid="stPopover"] button *,
+        html body button[data-testid="stPopoverButton"] * { color: #ffffff !important; }
+        html body div[data-testid="stPopover"] button:hover,
+        html body button[data-testid="stPopoverButton"]:hover {
             background-color: #262730 !important;
             background: #262730 !important;
             color: #ffffff !important;
             border-color: #4b5563 !important;
         }
-        div[data-testid="stPopover"] > button:hover * { color: #ffffff !important; }
+        html body div[data-testid="stPopover"] button:hover *,
+        html body button[data-testid="stPopoverButton"]:hover * { color: #ffffff !important; }
     }
     """
 
@@ -2600,22 +2612,26 @@ else:
     }
 
     /* ダークモード時の設定（Popover）ボタン：グレー背景・白文字・ホバー変更なし */
-    div[data-testid="stPopover"] > button {
+    html body div[data-testid="stPopover"] button,
+    html body button[data-testid="stPopoverButton"] {
         background-color: #262730 !important;
         background: #262730 !important;
         color: #ffffff !important;
         border: 1px solid #4b5563 !important;
     }
-    div[data-testid="stPopover"] > button * {
+    html body div[data-testid="stPopover"] button *,
+    html body button[data-testid="stPopoverButton"] * {
         color: #ffffff !important;
     }
-    div[data-testid="stPopover"] > button:hover {
+    html body div[data-testid="stPopover"] button:hover,
+    html body button[data-testid="stPopoverButton"]:hover {
         background-color: #262730 !important;
         background: #262730 !important;
         color: #ffffff !important;
         border-color: #4b5563 !important;
     }
-    div[data-testid="stPopover"] > button:hover * {
+    html body div[data-testid="stPopover"] button:hover *,
+    html body button[data-testid="stPopoverButton"]:hover * {
         color: #ffffff !important;
     }
     """
@@ -2768,10 +2784,10 @@ st.markdown(
         border-radius: 8px !important;
     }}
 
-    /* アクションボタン 競馬ブックグリーン（深緑）統一 */
-    div.stButton > button,
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-primary"] {{
+    /* アクションボタン 競馬ブックグリーン（深緑）統一（設定ポップオーバーボタンは除外） */
+    div.stButton > button:not([data-testid="stPopoverButton"]),
+    button[data-testid="stBaseButton-secondary"]:not([data-testid="stPopoverButton"]),
+    button[data-testid="stBaseButton-primary"]:not([data-testid="stPopoverButton"]) {{
         background-color: #1b5e20 !important;
         background: #1b5e20 !important;
         color: #ffffff !important;
@@ -2780,13 +2796,37 @@ st.markdown(
         box-shadow: 0 2px 5px rgba(27, 94, 32, 0.4) !important;
         border-radius: 6px !important;
     }}
-    div.stButton > button:hover,
-    button[data-testid="stBaseButton-secondary"]:hover,
-    button[data-testid="stBaseButton-primary"]:hover {{
+    div.stButton > button:not([data-testid="stPopoverButton"]):hover,
+    button[data-testid="stBaseButton-secondary"]:not([data-testid="stPopoverButton"]):hover,
+    button[data-testid="stBaseButton-primary"]:not([data-testid="stPopoverButton"]):hover {{
         background-color: #2e7d32 !important;
         background: #2e7d32 !important;
         border-color: #4caf50 !important;
         box-shadow: 0 0 12px rgba(46, 125, 50, 0.7) !important;
+    }}
+
+    /* ⚙️ 設定ポップオーバーボタンの最高優先度スタイル（ダーク/ライト完全上書き） */
+    html body div[data-testid="stPopover"] button,
+    html body button[data-testid="stPopoverButton"] {{
+        background-color: {"#ffffff" if selected_theme == "ライトモード" else "#262730"} !important;
+        background: {"#ffffff" if selected_theme == "ライトモード" else "#262730"} !important;
+        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
+        border: 1px solid {"#d1d5db" if selected_theme == "ライトモード" else "#4b5563"} !important;
+    }}
+    html body div[data-testid="stPopover"] button *,
+    html body button[data-testid="stPopoverButton"] * {{
+        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
+    }}
+    html body div[data-testid="stPopover"] button:hover,
+    html body button[data-testid="stPopoverButton"]:hover {{
+        background-color: {"#e5e7eb" if selected_theme == "ライトモード" else "#262730"} !important;
+        background: {"#e5e7eb" if selected_theme == "ライトモード" else "#262730"} !important;
+        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
+        border-color: {"#d1d5db" if selected_theme == "ライトモード" else "#4b5563"} !important;
+    }}
+    html body div[data-testid="stPopover"] button:hover *,
+    html body button[data-testid="stPopoverButton"]:hover * {{
+        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
     }}
 
     div[data-testid="stDataFrame"] div[role="progressbar"] {{
