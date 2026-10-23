@@ -2463,28 +2463,35 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一・文字色完全固定・ヘッダー帯再現）
+# 🎨 画面モード＆デザインCSS定義（切り替え修正 ＆ ウィジェットラベル白文字化）
 # --------------------------------------------------
 
 selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
 
 if selected_theme == "ライトモード":
     theme_css = """
-    .main { background-color: #f8f9fa !important; color: #212529 !important; }
+    [data-testid="stAppViewContainer"], .main, .stApp { background-color: #f8f9fa !important; color: #212529 !important; }
     .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
     .card-title, .card-horse-name { color: #111827 !important; }
+    [data-testid="stWidgetLabel"] p, label p, label span { color: #212529 !important; }
     """
 elif selected_theme == "システムに合わせる":
     theme_css = """
     @media (prefers-color-scheme: light) {
-        .main { background-color: #f8f9fa !important; color: #212529 !important; }
+        [data-testid="stAppViewContainer"], .main, .stApp { background-color: #f8f9fa !important; color: #212529 !important; }
         .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
         .card-title, .card-horse-name { color: #111827 !important; }
+        [data-testid="stWidgetLabel"] p, label p, label span { color: #212529 !important; }
+    }
+    @media (prefers-color-scheme: dark) {
+        [data-testid="stAppViewContainer"], .main, .stApp { background-color: #0b0e14 !important; color: #ffffff !important; }
+        [data-testid="stWidgetLabel"] p, label p, label span { color: #ffffff !important; }
     }
     """
 else:
     theme_css = """
-    .main { background-color: #0b0e14 !important; color: #ffffff !important; }
+    [data-testid="stAppViewContainer"], .main, .stApp { background-color: #0b0e14 !important; color: #ffffff !important; }
+    [data-testid="stWidgetLabel"] p, label p, label span { color: #ffffff !important; }
     """
 
 st.markdown(
@@ -2493,7 +2500,6 @@ st.markdown(
     /* 全幅レイアウト＆上部見切れ防止の余白設定 */
     [data-testid="stAppViewContainer"] {{
         width: 100% !important;
-        background-color: #0b0e14 !important;
     }}
     .main .block-container,
     div[data-testid="stMainBlockContainer"],
@@ -2516,7 +2522,20 @@ st.markdown(
 
     {theme_css}
 
-    /* ヘッダー帯デザイン（イメージ画像準拠の深緑背景帯） */
+    /* 入力・選択ウィジェット全般のラベル（赤枠部分含む）文字色を白固定 */
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] span,
+    label[data-testid="stWidgetLabel"],
+    .stSelectbox label, .stSelectbox label p,
+    .stTextInput label, .stTextInput label p,
+    .stFileUploader label, .stFileUploader label p,
+    .stTextArea label, .stTextArea label p {{
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }}
+
+    /* ヘッダー帯デザイン */
     .header-banner {{
         background-color: #113819 !important;
         padding: 16px 20px 10px 20px !important;
@@ -2560,7 +2579,7 @@ st.markdown(
         font-weight: 600 !important;
     }}
 
-    /* 横型ナビゲーションバーデザイン（緑ヘッダー帯内と自然に統合） */
+    /* 横型ナビゲーションバーデザイン */
     div[data-testid="stRadio"] > div[role="radiogroup"] {{
         background-color: #154520 !important;
         padding: 6px 10px !important;
@@ -2580,7 +2599,6 @@ st.markdown(
         background-color: rgba(255, 255, 255, 0.2) !important;
         cursor: pointer;
     }}
-    /* 選択中のタブ */
     div[data-testid="stRadio"] > div[role="radiogroup"] > label[aria-checked="true"],
     div[data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {{
         background-color: #2e7d32 !important;
@@ -2723,7 +2741,7 @@ elif "race" in query_params and not mode_param:
 
 
 # --------------------------------------------------
-# 🧭 トップヘッダー（イメージ画像再現） ＆ 横型ナビゲーション ＆ 設定ポップオーバー
+# 🧭 トップヘッダー ＆ 横型ナビゲーション ＆ 設定ポップオーバー
 # --------------------------------------------------
 
 if "g1_text_val" not in st.session_state:
@@ -2756,7 +2774,7 @@ if "draft_toast_msg" in st.session_state:
         st.error(msg_text)
         st.toast(msg_text, icon="❌")
 
-# イメージ画像の深緑ヘッダー帯を再現
+# トップヘッダー帯
 st.markdown('<div class="header-banner">', unsafe_allow_html=True)
 col_head_left, col_head_right = st.columns([4, 1])
 
@@ -2801,7 +2819,7 @@ with col_head_right:
         st.caption("📱 スマホ表示対応モード動作中")
         st.caption("ℹ️ システムバージョン: Ver 3.1")
 
-# 競馬ブック風 横一列ナビゲーションバー
+# 横一列ナビゲーションバー
 menu_options = [
     "📋 レース分析・予想",
     "🏇 現地観戦用（勝負5R厳選）",
@@ -2882,7 +2900,7 @@ if selected_menu == "📋 レース分析・予想":
                 default_idx = existing_drafts.index(st.session_state["selected_draft_race"]) + 1
 
             draft_choice = st.selectbox(
-                "📂 保存・編集する対象レースを選択（新規または既存）：",
+                "保存・編集する対象レースを選択（新規または既存）：",
                 ["✨ 【新規レースとして保存（馬柱からレース名自動判定）】"] + existing_drafts,
                 index=default_idx,
                 key="draft_race_select_box"
@@ -2890,7 +2908,7 @@ if selected_menu == "📋 レース分析・予想":
             
             if draft_choice == "✨ 【新規レースとして保存（馬柱からレース名自動判定）】":
                 draft_race_name = st.text_input(
-                    "✏️ レース名を手動指定する場合（※空欄ならファイル名から自動設定されます）",
+                    "レース名を手動指定する場合（※空欄ならファイル名から自動設定されます）",
                     "",
                 )
                 display_target_name = draft_race_name.strip() if draft_race_name.strip() else "✨ 新規レース（自動判定）"
@@ -2955,7 +2973,7 @@ if selected_menu == "📋 レース分析・予想":
         )
 
     pdf_page_opt = st.radio(
-        "📄 競馬ブックPDFの読み込み範囲",
+        "競馬ブックPDFの読み込み範囲",
         ["1ページ目のみ（推奨）", "全ページ読み込む"],
         index=0,
         horizontal=True,
