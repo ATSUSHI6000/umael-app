@@ -3880,6 +3880,30 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
             disp_db_df = disp_db_df.reindex(columns=final_all_cols)
 
+            # レースごとにグループ化し、馬番順に綺麗に整列させる
+            if "レース名" in disp_db_df.columns:
+                if "馬番" in disp_db_df.columns:
+                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
+                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
+                else:
+                    disp_db_df = disp_db_df.sort_values(by=["レース名"])
+
+        # レースごとにグループ化し、馬番順に綺麗に整列させる
+            if "レース名" in disp_db_df.columns:
+                if "馬番" in disp_db_df.columns:
+                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
+                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
+                else:
+                    disp_db_df = disp_db_df.sort_values(by=["レース名"])
+
+            # レースごとにグループ化し、馬番順に綺麗に整列させる
+            if "レース名" in disp_db_df.columns:
+                if "馬番" in disp_db_df.columns:
+                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
+                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
+                else:
+                    disp_db_df = disp_db_df.sort_values(by=["レース名"])                    
+
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
             if search_race:
                 mask = (
