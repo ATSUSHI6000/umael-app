@@ -2463,20 +2463,20 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（ライトモード反転 ＆ 見出しスタイルイメージ準拠）
+# 🎨 画面モード＆デザインCSS定義（緑要素白文字固定 ＆ 設定ポップオーバー最適化）
 # --------------------------------------------------
 
 selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
 
 if selected_theme == "ライトモード":
     theme_css = """
-    /* ライトモード背景＆基本文字色反転 */
+    /* ライトモード背景＆基本文字色 */
     [data-testid="stAppViewContainer"], .main, .stApp { 
         background-color: #f8f9fa !important; 
         color: #111827 !important; 
     }
     
-    /* 入力・ウィジェットラベル文字色反転 */
+    /* 入力・ウィジェットラベル文字色 */
     [data-testid="stWidgetLabel"],
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] span,
@@ -2489,7 +2489,7 @@ if selected_theme == "ライトモード":
         font-weight: 700 !important;
     }
 
-    /* 見出しテキスト色反転 */
+    /* 見出しテキスト色 */
     h1, h2, h3, h4, h5, h6,
     .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
         color: #111827 !important;
@@ -2497,13 +2497,10 @@ if selected_theme == "ライトモード":
         letter-spacing: -0.5px;
     }
 
-    /* ラジオボタン選択肢の文字色反転 */
+    /* ライトモード時の通常のラジオボタン項目（白背景部分）テキスト色 */
     div[data-testid="stRadio"] label,
     div[data-testid="stRadio"] label p,
-    div[data-testid="stRadio"] label span,
-    div[data-baseweb="radio"] *,
-    label[data-baseweb="radio"] *,
-    .stRadio p, .stRadio label, .stRadio span, .stRadio div {
+    div[data-testid="stRadio"] label span {
         color: #111827 !important;
         font-weight: 600 !important;
     }
@@ -2583,6 +2580,65 @@ st.markdown(
 
     {theme_css}
 
+    /* 🟢【赤枠指定】緑色背景のラジオボタン要素・ナビゲーション・緑ボタン上の文字色を「完全白文字（#ffffff）」に固定保持 */
+    div[data-testid="stRadio"] > div[role="radiogroup"] label,
+    div[data-testid="stRadio"] > div[role="radiogroup"] label *,
+    div[data-testid="stRadio"] > div[role="radiogroup"] span,
+    div[data-testid="stRadio"] > div[role="radiogroup"] p,
+    .header-banner *,
+    div[data-testid="stAlert"] *,
+    div[data-testid="stAlert"] p,
+    div[data-testid="stAlert"] span,
+    div[data-testid="stAlert"] div,
+    .stAlert p, .stAlert div, .stAlert span,
+    div.stButton > button *,
+    button[data-testid="stBaseButton-secondary"] *,
+    button[data-testid="stBaseButton-primary"] * {{
+        color: #ffffff !important;
+        fill: #ffffff !important;
+    }}
+
+    /* ⚙️ 設定ポップオーバー（Popover）内の可視性・文字反転修正 */
+    div[data-testid="stPopoverBody"],
+    div[data-baseweb="popover"],
+    div[role="dialog"] {{
+        background-color: #ffffff !important;
+        border: 1px solid #d1d5db !important;
+        border-radius: 12px !important;
+        color: #111827 !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2) !important;
+    }}
+    div[data-testid="stPopoverBody"] *,
+    div[data-baseweb="popover"] *,
+    div[role="dialog"] * {{
+        color: #111827 !important;
+    }}
+    div[data-testid="stPopoverBody"] h1,
+    div[data-testid="stPopoverBody"] h2,
+    div[data-testid="stPopoverBody"] h3,
+    div[data-testid="stPopoverBody"] h4,
+    div[data-testid="stPopoverBody"] label,
+    div[data-testid="stPopoverBody"] label p,
+    div[data-testid="stPopoverBody"] span,
+    div[data-testid="stPopoverBody"] div {{
+        color: #111827 !important;
+        font-weight: bold !important;
+    }}
+    /* ポップオーバー内の入力エリア */
+    div[data-testid="stPopoverBody"] input,
+    div[data-testid="stPopoverBody"] div[data-baseweb="select"] > div {{
+        background-color: #f3f4f6 !important;
+        color: #111827 !important;
+        border-color: #d1d5db !important;
+    }}
+
+    /* ポップオーバー内の緑色要素（画面モードラジオボタン選択エリア等）は白文字をそのまま維持 */
+    div[data-testid="stPopoverBody"] div[data-testid="stRadio"] > div[role="radiogroup"],
+    div[data-testid="stPopoverBody"] div[data-testid="stRadio"] > div[role="radiogroup"] * {{
+        background-color: #113819 !important;
+        color: #ffffff !important;
+    }}
+
     /* ヘッダー帯デザイン（イメージ画像再現） */
     .header-banner {{
         background-color: #113819 !important;
@@ -2642,10 +2698,6 @@ st.markdown(
         background-color: #1b5e20 !important;
         border: 1px solid #2e7d32 !important;
         border-radius: 8px !important;
-    }}
-    div[data-testid="stAlert"] *, .stAlert p, .stAlert div, .stAlert span {{
-        color: #ffffff !important;
-        font-weight: 600 !important;
     }}
 
     /* アクションボタン 競馬ブックグリーン（深緑）統一 */
