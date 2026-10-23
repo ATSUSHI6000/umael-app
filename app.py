@@ -1103,7 +1103,7 @@ def save_db_to_sheet(df):
 
     except Exception as e:
         st.error(f"❌ スプレッドシート同期エラーが発生しました！")
-        st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレース】:\n{traceback.format_exc()}")
+        st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレーサ】:\n{traceback.format_exc()}")
 
 
 def load_db(selected_year=None):
@@ -2249,7 +2249,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
     def render_summary_body():
         st.markdown(
-            f"<h2 style='text-align: center; color: #1b5e20; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
+            f"<h2 style='text-align: center; color: #ffffff; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
             unsafe_allow_html=True,
         )
 
@@ -2463,7 +2463,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一・文字色完全固定・余白調整）
+# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一・文字色完全固定・ヘッダー帯再現）
 # --------------------------------------------------
 
 selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
@@ -2484,7 +2484,7 @@ elif selected_theme == "システムに合わせる":
     """
 else:
     theme_css = """
-    .main { background-color: #080a0f !important; color: #f1f5f9 !important; }
+    .main { background-color: #0b0e14 !important; color: #ffffff !important; }
     """
 
 st.markdown(
@@ -2493,16 +2493,17 @@ st.markdown(
     /* 全幅レイアウト＆上部見切れ防止の余白設定 */
     [data-testid="stAppViewContainer"] {{
         width: 100% !important;
+        background-color: #0b0e14 !important;
     }}
     .main .block-container,
     div[data-testid="stMainBlockContainer"],
     div[data-testid="stAppViewBlockContainer"],
     section.main > div {{
-        max-width: 99% !important;
-        width: 99% !important;
+        max-width: 100% !important;
+        width: 100% !important;
         padding-left: 0.8rem !important;
         padding-right: 0.8rem !important;
-        padding-top: 2.2rem !important; /* 上部見切れ防止のため余白を拡大 */
+        padding-top: 0.8rem !important;
     }}
 
     /* サイドバーの非表示（完全全幅化） */
@@ -2515,15 +2516,76 @@ st.markdown(
 
     {theme_css}
 
-    /* メインタイトル 競馬ブックグリーン ＆ マージン調整 */
+    /* ヘッダー帯デザイン（イメージ画像準拠の深緑背景帯） */
+    .header-banner {{
+        background-color: #113819 !important;
+        padding: 16px 20px 10px 20px !important;
+        border-radius: 10px 10px 0 0 !important;
+        margin-bottom: 0px !important;
+    }}
+
     .app-main-title {{
-        color: #1b5e20 !important;
-        font-size: 2.2rem !important;
-        font-weight: 800 !important;
-        margin-top: 10px !important; /* タイトルが見切れないよう少し下へ下げる */
-        margin-bottom: 0 !important;
+        color: #ffffff !important;
+        font-size: 2.5rem !important;
+        font-weight: 900 !important;
+        margin: 0 !important;
         padding: 0 !important;
         letter-spacing: -0.5px;
+        line-height: 1.1;
+    }}
+
+    .app-sub-title {{
+        color: #e0e6ed !important;
+        font-size: 0.95rem !important;
+        margin-top: 6px !important;
+        margin-bottom: 10px !important;
+        line-height: 1.3;
+    }}
+
+    /* すべての見出しテキスト色を完全白色に固定 */
+    h1, h2, h3, h4, h5, h6,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {{
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }}
+
+    /* ラジオボタン選択肢・ラベル・テキストを完全に白固定 */
+    div[data-testid="stRadio"] label,
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stRadio"] label span,
+    div[data-baseweb="radio"] *,
+    label[data-baseweb="radio"] *,
+    .stRadio p, .stRadio label, .stRadio span, .stRadio div {{
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }}
+
+    /* 横型ナビゲーションバーデザイン（緑ヘッダー帯内と自然に統合） */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {{
+        background-color: #154520 !important;
+        padding: 6px 10px !important;
+        border-radius: 8px !important;
+        gap: 6px !important;
+        flex-wrap: wrap !important;
+    }}
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
+        background-color: transparent !important;
+        padding: 6px 14px !important;
+        border-radius: 6px !important;
+        color: #ffffff !important;
+        font-weight: bold !important;
+        border: none !important;
+    }}
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
+        background-color: rgba(255, 255, 255, 0.2) !important;
+        cursor: pointer;
+    }}
+    /* 選択中のタブ */
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label[aria-checked="true"],
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {{
+        background-color: #2e7d32 !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
     }}
 
     /* st.info / stAlert （緑枠通知メッセージ）内の文字色を完全に白固定 */
@@ -2533,7 +2595,8 @@ st.markdown(
     .stAlert p,
     .stAlert div,
     .stAlert span,
-    .stAlert label {{
+    .stAlert label,
+    .stAlert code {{
         color: #ffffff !important;
         font-weight: 600 !important;
     }}
@@ -2564,27 +2627,6 @@ st.markdown(
         background: #2e7d32 !important;
         border-color: #4caf50 !important;
         box-shadow: 0 0 12px rgba(46, 125, 50, 0.7) !important;
-    }}
-
-    /* 横型ナビゲーションバーデザイン */
-    div[data-testid="stRadio"] > div[role="radiogroup"] {{
-        background-color: #1b5e20 !important;
-        padding: 6px 10px !important;
-        border-radius: 8px !important;
-        gap: 6px !important;
-        flex-wrap: wrap !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
-        background-color: rgba(255, 255, 255, 0.12) !important;
-        padding: 6px 14px !important;
-        border-radius: 6px !important;
-        color: #ffffff !important;
-        font-weight: bold !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
-        background-color: rgba(255, 255, 255, 0.25) !important;
-        cursor: pointer;
     }}
 
     div[data-testid="stDataFrame"] div[role="progressbar"] {{
@@ -2681,7 +2723,7 @@ elif "race" in query_params and not mode_param:
 
 
 # --------------------------------------------------
-# 🧭 トップヘッダー ＆ 横型ナビゲーション ＆ 設定ポップオーバー
+# 🧭 トップヘッダー（イメージ画像再現） ＆ 横型ナビゲーション ＆ 設定ポップオーバー
 # --------------------------------------------------
 
 if "g1_text_val" not in st.session_state:
@@ -2714,13 +2756,13 @@ if "draft_toast_msg" in st.session_state:
         st.error(msg_text)
         st.toast(msg_text, icon="❌")
 
+# イメージ画像の深緑ヘッダー帯を再現
+st.markdown('<div class="header-banner">', unsafe_allow_html=True)
 col_head_left, col_head_right = st.columns([4, 1])
 
 with col_head_left:
     st.markdown("<h1 class='app-main-title'>Umael-Pro</h1>", unsafe_allow_html=True)
-    st.caption(
-        "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
-    )
+    st.markdown("<div class='app-sub-title'>馬柱・血統・予想オッズ・競馬ブック・馬場情報<br>一括AI解析＆Webプール＆現地観戦厳選</div>", unsafe_allow_html=True)
 
 with col_head_right:
     with st.popover("☰ 設定", use_container_width=True):
@@ -2778,6 +2820,7 @@ selected_menu = st.radio(
     horizontal=True,
     label_visibility="collapsed",
 )
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
 
