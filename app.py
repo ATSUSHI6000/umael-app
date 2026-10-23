@@ -3757,7 +3757,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         st.divider()
 
         all_races_in_db = (
-            db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+            sorted([str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
         )
         # デフォルトで「🌐 すべてのレース（全件一括表示）」を先頭＆インデックス0に設定
         race_selector_options = ["🌐 すべてのレース（全件一括表示）"] + all_races_in_db
