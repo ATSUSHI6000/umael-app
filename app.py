@@ -1161,103 +1161,66 @@ def load_db(selected_year=None):
         selected_year = f"{time.strftime('%Y')}年"
     migrate_and_clean_all_dbs()
 
-    # 1. まずスプレッドシートから最新データを取得
-    sheet_df = load_db_from_sheet()
-    if not sheet_df.empty:
-        combined = sheet_df
-    else:
-        # スプレッドシートが空の場合はローカルCSV群から取得
-        all_dfs = []
+    all_dfs = []
 
-        year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
-        if os.path.exists(year_2026_file):
-            try:
-                sub_df = pd.read_csv(year_2026_file, dtype=str).fillna("")
-                all_dfs.append(sub_df)
-            except Exception:
-                pass
-
-        if os.path.exists(DB_FILE):
-            try:
-                m_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+    # 1. ローカルのメインデータベース(umael_database.csv)を最優先で読み込み
+    if os.path.exists(DB_FILE):
+        try:
+            m_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
+            if not m_df.empty:
                 all_dfs.append(m_df)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-        if os.path.exists(DATA_DIR):
-            for entry in os.listdir(DATA_DIR):
-                y_dir = os.path.join(DATA_DIR, entry)
-                if os.path.isdir(y_dir) and entry != "2026":
-                    y_file = os.path.join(y_dir, DB_FILE)
-                    if os.path.exists(y_file):
-                        try:
-                            sub_df = pd.read_csv(y_file, dtype=str).fillna("")
+    # 2. data/配下の各年度フォルダ内のデータベースを読み込み
+    if os.path.exists(DATA_DIR):
+        for entry in os.listdir(DATA_DIR):
+            y_dir = os.path.join(DATA_DIR, entry)
+            if os.path.isdir(y_dir):
+                y_file = os.path.join(y_dir, DB_FILE)
+                if os.path.exists(y_file):
+                    try:
+                        sub_df = pd.read_csv(y_file, dtype=str).fillna("")
+                        if not sub_df.empty:
                             all_dfs.append(sub_df)
-                        except Exception:
-                            pass
+                    except Exception:
+                        pass
 
-        if not all_dfs:
-            return pd.DataFrame()
+    # 3. ローカルにデータが無い場合のみスプレッドシートを参照
+    if not all_dfs:
+        sheet_df = load_db_from_sheet()
+        if not sheet_df.empty:
+            all_dfs.append(sheet_df)
 
-        combined = pd.concat(all_dfs, ignore_index=True)
+    if not all_dfs:
+        return pd.DataFrame()
 
+    combined = pd.concat(all_dfs, ignore_index=True)
     combined = combined.replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
     if "レース名" in combined.columns:
         combined["レース名"] = combined["レース名"].astype(str).str.strip()
         combined = combined[combined["レース名"] != ""]
 
-    combined = combined.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
-
-    if "軸ヒモ切り" in combined.columns:
-        combined = combined.drop(columns=["軸ヒモ切り"])
-    if "人気" in combined.columns:
-        combined = combined.drop(columns=["人気"])
+    # 馬名とレース名で重複があれば、着順（数字）が入っている方を優先して残す
+    if "馬名" in combined.columns and "レース名" in combined.columns:
+        rank_col = "確定着順" if "確定着順" in combined.columns else ("着順" if "着順" in combined.columns else None)
+        if rank_col:
+            combined["has_rank"] = combined[rank_col].apply(lambda x: 1 if str(x).strip() != "" else 0)
+            combined = combined.sort_values("has_rank", ascending=False).drop_duplicates(subset=["レース名", "馬名"]).drop(columns=["has_rank"])
+        else:
+            combined = combined.drop_duplicates(subset=["レース名", "馬名"], keep="last")
 
     combined = sanitize_dataframe_columns(combined)
 
-    if "総合スコア" in combined.columns:
-        combined["総合スコア_num"] = pd.to_numeric(combined["総合スコア"], errors="coerce").fillna(0).astype(int)
-        combined = combined.sort_values(by=["レース名", "総合スコア_num"], ascending=[True, False]).drop(columns=["総合スコア_num"]).reset_index(drop=True)
-
-    if "年" not in combined.columns and "年度" in combined.columns:
-        combined["年"] = combined["年度"]
-    elif "年" not in combined.columns and "レース名" in combined.columns:
+    if "年" not in combined.columns and "レース名" in combined.columns:
         combined["年"] = combined["レース名"].apply(extract_year_from_race_name)
-    elif "年" not in combined.columns:
-        combined["年"] = "2026"
 
     if selected_year and selected_year != "全期間":
         target_y = str(selected_year).replace("年", "").strip()
         combined = combined[combined["年"].astype(str) == target_y].reset_index(drop=True)
 
-    return combined
-
-def save_to_db(new_df):
-    if new_df is None or new_df.empty:
-        return load_db()
-
-    clean_save_df = sanitize_dataframe_columns(new_df)
-    if "レース名" not in clean_save_df.columns:
-        return load_db("全期間")
-
-    # 1. 既存データベースと新規データの統合（重複レースの差し替え）
-    current_db = load_db(selected_year="全期間")
-    save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
-    
-    if not current_db.empty and "レース名" in current_db.columns:
-        current_db = current_db[~current_db["レース名"].astype(str).str.strip().isin(save_races)]
-    
-    combined = pd.concat([current_db, clean_save_df], ignore_index=True, sort=False)
-    combined = sanitize_dataframe_columns(combined)
-    
-    # 2. ローカルCSVへ保存
-    combined.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
-
-    # 3. Googleスプレッドシートの「重賞レース分析」タブへ自動同期書き込み（★ここが永久保存！）
-    save_db_to_sheet(combined)
-
-    return combined
+    return combined.reset_index(drop=True)
 
 
 def get_available_years_in_db():
@@ -1275,14 +1238,12 @@ def save_to_db(new_df):
 
     clean_save_df = sanitize_dataframe_columns(new_df)
     if "レース名" not in clean_save_df.columns:
-        st.warning("⚠️ レース名がないため、年度別保存を実行できませんでした。")
         return load_db("全期間")
 
-    # 新規保存対象のレース名を取り出す（同じレースの古い行を置き換える）
     save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
     save_races = [r for r in save_races if r]
 
-    # 1. ルート直下のマスターDBを更新
+    # ルートマスターDB更新
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -1294,56 +1255,21 @@ def save_to_db(new_df):
 
     if not root_df.empty and "レース名" in root_df.columns:
         root_df = root_df[~root_df["レース名"].astype(str).str.strip().isin(save_races)]
+    
     combined_root = pd.concat([root_df, clean_save_df], ignore_index=True, sort=False)
     combined_root = sanitize_dataframe_columns(combined_root)
     if "レース名" in combined_root.columns and "馬番" in combined_root.columns:
         combined_root = combined_root.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
-    combined_root = combined_root[[col for col in combined_root.columns if col != "年"] + ["年"]]
+    
     combined_root.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-    # 2. データを行ごとの「年」でグループ化して、自動で年度フォルダを作成・更新
-    if "年" not in clean_save_df.columns:
-        clean_save_df["年"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
-    clean_save_df["年"] = clean_save_df["年"].astype(str).str.extract(r"(20\d{2})", expand=False).fillna(time.strftime("%Y"))
+    # スプレッドシートへもバックアップ同期
+    try:
+        save_db_to_sheet(combined_root)
+    except Exception:
+        pass
 
-    for year_val, year_new_df in clean_save_df.groupby("年", sort=False):
-        year_val = str(year_val)
-        if not re.fullmatch(r"20\d{2}", year_val):
-            year_val = time.strftime("%Y")
-            year_new_df = year_new_df.copy()
-            year_new_df["年"] = year_val
-        year_dir = os.path.join(DATA_DIR, year_val)
-        os.makedirs(year_dir, exist_ok=True)
-        year_db_path = os.path.join(year_dir, DB_FILE)
-
-        if os.path.exists(year_db_path):
-            try:
-                old_year_df = pd.read_csv(year_db_path, dtype=str).fillna("")
-                old_year_df = sanitize_dataframe_columns(old_year_df) if not old_year_df.empty else old_year_df
-            except Exception:
-                old_year_df = pd.DataFrame()
-        else:
-            old_year_df = pd.DataFrame()
-
-        if not old_year_df.empty:
-            if "年" in old_year_df.columns:
-                old_year_df = old_year_df[old_year_df["年"].astype(str) == year_val]
-            if "レース名" in old_year_df.columns:
-                replacing_races = year_new_df["レース名"].astype(str).str.strip().unique().tolist()
-                old_year_df = old_year_df[~old_year_df["レース名"].astype(str).str.strip().isin(replacing_races)]
-
-        combined_year_df = pd.concat([old_year_df, year_new_df], ignore_index=True, sort=False)
-        combined_year_df = sanitize_dataframe_columns(combined_year_df)
-        combined_year_df = combined_year_df[combined_year_df["年"].astype(str) == year_val].copy()
-        if "レース名" in combined_year_df.columns and "馬番" in combined_year_df.columns:
-            combined_year_df = combined_year_df.drop_duplicates(subset=["レース名", "馬番"], keep="last").reset_index(drop=True)
-        combined_year_df = combined_year_df[[col for col in combined_year_df.columns if col != "年"] + ["年"]]
-        combined_year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
-
-    # 再読込時にも既存ファイルを年度別に再整理する
-    unique_years = clean_save_df["年"].dropna().astype(str).unique().tolist()
-    selected_year = f"{unique_years[0]}年" if len(unique_years) == 1 else "全期間"
-    return load_db(selected_year=selected_year)
+    return load_db(selected_year="全期間")
 
 def update_db_with_recap(race_name, result_df, memo_text):
     if not os.path.exists(DB_FILE):
