@@ -3796,16 +3796,17 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         }
 
         # --------------------------------------------------
-        # 1. 特定レース選択時
+        # 1. 特定レース選択時（レース内を評価順/総合スコア降順で整列）
         # --------------------------------------------------
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
-            filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
-
-            # 総合スコア（評価）が高い順に並べ替える
-            if "総合スコア" in filtered_df.columns:
-                filtered_df["_score_num"] = pd.to_numeric(filtered_df["総合スコア"], errors="coerce").fillna(0)
-                filtered_df = filtered_df.sort_values(by="_score_num", ascending=False).drop(columns=["_score_num"])
+            filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)].copy()
             
+            # 総合スコア（全角・「点」対応）を数値化して降順（評価順）にソート＆インデックス振り直し
+            if "総合スコア" in filtered_df.columns:
+                filtered_df["_sort_score"] = filtered_df["総合スコア"].astype(str).str.replace("点", "").str.strip()
+                filtered_df["_sort_score"] = pd.to_numeric(filtered_df["_sort_score"], errors="coerce").fillna(0)
+                filtered_df = filtered_df.sort_values(by="_sort_score", ascending=False).drop(columns=["_sort_score"]).reset_index(drop=True)
+
             st.markdown(f"### 🏇 【{selected_db_race}】 解析データ（出走頭数: {len(filtered_df)}頭）")
 
             single_race_cols = [
@@ -3818,16 +3819,14 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 ] if c in filtered_df.columns
             ]
             
-            # その他の未指定カラムを抽出（「年」は除外）
             extra_cols = [c for c in filtered_df.columns if c not in single_race_cols and c != "年"]
             
-            # 最後に「年」を一番右端に確実にセット
             final_cols = single_race_cols + extra_cols
             if "年" in filtered_df.columns:
                 final_cols.append("年")
 
             disp_single_df = filtered_df[final_cols]
-            disp_single_df = disp_single_df[disp_single_df["馬名"].astype(str).str.strip() != ""].dropna(how="all")
+            disp_single_df = disp_single_df[disp_single_df["馬名"].astype(str).str.strip() != ""].dropna(how="all").reset_index(drop=True)
 
             calc_db_single_height = min(800, (len(disp_single_df) + 1) * 38 + 40)
 
@@ -3862,7 +3861,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 )
 
         # --------------------------------------------------
-        # 2. 🌐 すべてのレース（全件一括表示）※デフォルト表示
+        # 2. 🌐 すべてのレース（全件一括表示：レースごとまとめ ＆ レース内は評価順）
         # --------------------------------------------------
         else:
             st.markdown("### 🌐 プール済み全レース・全頭一覧")
@@ -3878,36 +3877,20 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             
             extra_all_cols = [c for c in disp_db_df.columns if c not in cols_order and c != "年"]
             
-            # 最後に「年」を一番右端に確実にセット
             final_all_cols = cols_order + extra_all_cols
             if "年" in disp_db_df.columns:
                 final_all_cols.append("年")
 
             disp_db_df = disp_db_df.reindex(columns=final_all_cols)
 
-            # レースごとにグループ化し、馬番順に綺麗に整列させる
+            # レース名昇順 ＆ 各レース内は総合スコア降順（評価順）にソートしてインデックス振り直し
             if "レース名" in disp_db_df.columns:
-                if "馬番" in disp_db_df.columns:
-                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
-                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
+                if "総合スコア" in disp_db_df.columns:
+                    disp_db_df["_sort_score"] = disp_db_df["総合スコア"].astype(str).str.replace("点", "").str.strip()
+                    disp_db_df["_sort_score"] = pd.to_numeric(disp_db_df["_sort_score"], errors="coerce").fillna(0)
+                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_score"], ascending=[True, False]).drop(columns=["_sort_score"]).reset_index(drop=True)
                 else:
-                    disp_db_df = disp_db_df.sort_values(by=["レース名"])
-
-        # レースごとにグループ化し、馬番順に綺麗に整列させる
-            if "レース名" in disp_db_df.columns:
-                if "馬番" in disp_db_df.columns:
-                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
-                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
-                else:
-                    disp_db_df = disp_db_df.sort_values(by=["レース名"])
-
-            # レースごとにグループ化し、馬番順に綺麗に整列させる
-            if "レース名" in disp_db_df.columns:
-                if "馬番" in disp_db_df.columns:
-                    disp_db_df["_sort_num"] = pd.to_numeric(disp_db_df["馬番"], errors="coerce").fillna(99)
-                    disp_db_df = disp_db_df.sort_values(by=["レース名", "_sort_num"]).drop(columns=["_sort_num"])
-                else:
-                    disp_db_df = disp_db_df.sort_values(by=["レース名"])                    
+                    disp_db_df = disp_db_df.sort_values(by=["レース名"]).reset_index(drop=True)                    
 
             search_race = st.text_input("🔍 部分一致テキスト検索（レース名や馬名で絞り込み）", "")
             if search_race:
