@@ -2954,13 +2954,20 @@ if "draft_toast_msg" in st.session_state:
         st.error(msg_text)
         st.toast(msg_text, icon="❌")
 
-# トップヘッダー帯
+# トップヘッダー帯（ロゴ統合版）
 st.markdown('<div class="header-banner">', unsafe_allow_html=True)
 col_head_left, col_head_right = st.columns([4, 1])
 
 with col_head_left:
-    st.markdown("<h1 class='app-main-title'>Umael-Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<div class='app-sub-title'>馬柱・血統・予想オッズ・競馬ブック・馬場情報<br>一括AI解析＆Webプール＆現地観戦厳選</div>", unsafe_allow_html=True)
+    col_logo, col_text = st.columns([0.8, 3.2])
+    with col_logo:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+        else:
+            st.markdown("🏇", font_size="3rem")
+    with col_text:
+        st.markdown("<h1 class='app-main-title' style='margin:0;'>Umael-Pro</h1>", unsafe_allow_html=True)
+        st.markdown("<div class='app-sub-title' style='margin-top:2px;'>馬柱・血統・予想オッズ・競馬ブック・馬場情報<br>一括AI解析＆Webプール＆現地観戦厳選</div>", unsafe_allow_html=True)
 
 with col_head_right:
     with st.popover("☰ 設定", use_container_width=True):
