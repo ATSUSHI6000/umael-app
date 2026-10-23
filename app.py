@@ -3800,7 +3800,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         # --------------------------------------------------
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
-            
+
             # 総合スコア（評価）が高い順に並べ替える
             if "総合スコア" in filtered_df.columns:
                 filtered_df["_score_num"] = pd.to_numeric(filtered_df["総合スコア"], errors="coerce").fillna(0)
