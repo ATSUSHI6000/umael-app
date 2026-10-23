@@ -2964,7 +2964,7 @@ with col_head_left:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("🏇", font_size="3rem")
+            st.markdown("🏇", unsafe_allow_html=True)
     with col_text:
         st.markdown("<h1 class='app-main-title' style='margin:0;'>Umael-Pro</h1>", unsafe_allow_html=True)
         st.markdown("<div class='app-sub-title' style='margin-top:2px;'>馬柱・血統・予想オッズ・競馬ブック・馬場情報<br>一括AI解析＆Webプール＆現地観戦厳選</div>", unsafe_allow_html=True)
