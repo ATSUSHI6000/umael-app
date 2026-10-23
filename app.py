@@ -2463,7 +2463,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一）
+# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一・文字色完全固定・余白調整）
 # --------------------------------------------------
 
 selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
@@ -2490,7 +2490,7 @@ else:
 st.markdown(
     f"""
 <style>
-    /* 全幅レイアウト */
+    /* 全幅レイアウト＆上部見切れ防止の余白設定 */
     [data-testid="stAppViewContainer"] {{
         width: 100% !important;
     }}
@@ -2502,7 +2502,7 @@ st.markdown(
         width: 99% !important;
         padding-left: 0.8rem !important;
         padding-right: 0.8rem !important;
-        padding-top: 0.8rem !important;
+        padding-top: 2.2rem !important; /* 上部見切れ防止のため余白を拡大 */
     }}
 
     /* サイドバーの非表示（完全全幅化） */
@@ -2515,14 +2515,32 @@ st.markdown(
 
     {theme_css}
 
-    /* メインタイトル 競馬ブックグリーン */
+    /* メインタイトル 競馬ブックグリーン ＆ マージン調整 */
     .app-main-title {{
         color: #1b5e20 !important;
         font-size: 2.2rem !important;
         font-weight: 800 !important;
-        margin: 0 !important;
+        margin-top: 10px !important; /* タイトルが見切れないよう少し下へ下げる */
+        margin-bottom: 0 !important;
         padding: 0 !important;
         letter-spacing: -0.5px;
+    }}
+
+    /* st.info / stAlert （緑枠通知メッセージ）内の文字色を完全に白固定 */
+    div[data-testid="stAlert"],
+    div[data-testid="stNotification"],
+    div[data-testid="stAlert"] *,
+    .stAlert p,
+    .stAlert div,
+    .stAlert span,
+    .stAlert label {{
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }}
+    div[data-testid="stAlert"] {{
+        background-color: #1b5e20 !important;
+        border: 1px solid #2e7d32 !important;
+        border-radius: 8px !important;
     }}
 
     /* アクションボタン 競馬ブックグリーン（深緑）統一 */
@@ -2739,7 +2757,7 @@ with col_head_right:
         st.divider()
         st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
-        st.caption("ℹ️ システムバージョン: Ver 3.0")
+        st.caption("ℹ️ システムバージョン: Ver 3.1")
 
 # 競馬ブック風 横一列ナビゲーションバー
 menu_options = [
@@ -2855,7 +2873,7 @@ if selected_menu == "📋 レース分析・予想":
                     st.caption("まだ保存されているファイルはありません。")
 
     st.divider()
-    st.subheader("📂 データのアップロード (.txt / .csv / .pdf / .png / .jpg / URL)")
+    st.subheader("📂 データのアップロード")
 
     uploader_ver = st.session_state["uploader_key_ver"]
 
@@ -2863,7 +2881,7 @@ if selected_menu == "📋 レース分析・予想":
 
     with col1:
         files_group1 = st.file_uploader(
-            "1. 出馬表・枠順・近5走・血統 (.txt / .csv / .pdf / .png / .jpg)",
+            "1. 出馬表・枠順・近5走・血統",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg1_{uploader_ver}",
@@ -2871,21 +2889,15 @@ if selected_menu == "📋 レース分析・予想":
 
     with col2:
         files_group2 = st.file_uploader(
-            "2. 競馬ブック・調教データ (.pdf / .png / .jpg)",
-            type=["pdf", "png", "jpg", "jpeg"],
+            "2. 競馬ブック・調教データ",
+            type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg2_{uploader_ver}",
-        )
-        pdf_page_opt = st.radio(
-            "📄 競馬ブックPDFの読み込み範囲",
-            ["1ページ目のみ（推奨）", "全ページ読み込む"],
-            index=0,
-            key="pdf_page_opt",
         )
 
     with col3:
         files_group3 = st.file_uploader(
-            "3. 当日・前日の傾向・馬場情報 (.txt / .csv / .pdf / .png / .jpg)",
+            "3. 当日・前日の傾向・馬場情報",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg3_{uploader_ver}",
@@ -2893,11 +2905,19 @@ if selected_menu == "📋 レース分析・予想":
 
     with col4:
         files_group4 = st.file_uploader(
-            "4. その他各種データ (.txt / .csv / .pdf / .png / .jpg)",
+            "4. その他各種データ",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg4_{uploader_ver}",
         )
+
+    pdf_page_opt = st.radio(
+        "📄 競馬ブックPDFの読み込み範囲",
+        ["1ページ目のみ（推奨）", "全ページ読み込む"],
+        index=0,
+        horizontal=True,
+        key="pdf_page_opt",
+    )
 
     st.write("")
     urls_group5_input = st.text_area(
