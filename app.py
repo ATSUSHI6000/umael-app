@@ -20,9 +20,9 @@ from google.oauth2.service_account import Credentials
 # 連携対象の「競馬分析用シート」ID
 SPREADSHEET_ID = "1-WuffPHvbPHcdgb20pV4k9VZG7jeE8RAEhI83a2ScNo"
 
-# ページ基本設定（Umael-Pro 全幅＆トップナビ統合版）
+# ページ基本設定（ウマエルプロ v3.0 完全統合版）
 st.set_page_config(
-    page_title="Umael-Pro", page_icon="🏇", layout="wide"
+    page_title="ウマエルプロ v3.0", page_icon="🏇", layout="wide"
 )
 
 # ファイルパス・ディレクトリ設定
@@ -647,9 +647,11 @@ def convert_to_circled_numbers(text):
 
     import string
 
+    # 1. 退避対象（金額、点数、頭数、券種名など）を保護
     tokens = {}
 
     def generate_token_key(index):
+        # トークン名に数字を使わずアルファベットのみで生成（二重変換事故を100%防止）
         chars = string.ascii_uppercase
         result = ""
         while True:
@@ -664,9 +666,11 @@ def convert_to_circled_numbers(text):
         tokens[key] = match.group(0)
         return key
 
+    # 保護対象パターン：金額(〜円)、点数(〜点)、頭数(〜頭)、券種名(3連複/3連単など)、着順(1着〜)
     pattern = r'[\d,]+\s*円|\d+\s*点|\d+\s*頭|[1-3]\s*連[複単]|[1-3]\s*着'
     protected_text = re.sub(pattern, save_protected, text)
 
+    # 2. 1〜20の数字を丸数字に変換するマップ
     circled_map = {
         "1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤",
         "6": "⑥", "7": "⑦", "8": "⑧", "9": "⑨", "10": "⑩",
@@ -674,11 +678,13 @@ def convert_to_circled_numbers(text):
         "16": "⑯", "17": "⑰", "18": "⑱", "19": "⑲", "20": "⑳"
     }
 
+    # 20から1まで大きい順に丸数字置換（馬番のみ対象）
     for num in range(20, 0, -1):
         s_num = str(num)
         if s_num in circled_map:
             protected_text = re.sub(rf'(?<!\d){s_num}(?!\d)', circled_map[s_num], protected_text)
 
+    # 3. 退避させていた保護文字列（金額や単位）を元に戻す
     for key, original_val in tokens.items():
         protected_text = protected_text.replace(key, original_val)
 
@@ -701,260 +707,282 @@ def safe_int(val, default=0):
 # 🧼 データベースクレンジング ＆ マルチフォルダ同期ロジック
 # --------------------------------------------------
 
+import re
+import pandas as pd
+
+
 def sanitize_dataframe_columns(df):
-    if df is None or df.empty:
-        return df
-    df = df.copy()
-
-    drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
-        if drop_col in df.columns:
-            drop_target_cols.append(drop_col)
-
-    if drop_target_cols:
-        df = df.drop(columns=list(set(drop_target_cols)), errors="ignore")
-
-    df = df.loc[:, ~df.columns.duplicated()]
-
-    rename_map = {}
-    for orig_c in df.columns:
-        c_clean = (
-            str(orig_c).strip().replace(" ", "").replace("\n", "").replace("\r", "")
-        )
-        if (
-            c_clean in ["着順", "確定着順", "順位", "着"]
-            and "確定着順" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "確定着順"
-        elif (
-            c_clean in ["レース名", "レース", "Race", "RACE"]
-            and "レース名" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "レース名"
-        elif (
-            c_clean in ["馬名", "競走馬名", "Horse", "HORSE"]
-            and "馬名" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "馬名"
-        elif (
-            c_clean in ["馬番", "馬No", "馬NO", "No", "NO"]
-            and "馬番" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "馬番"
-        elif c_clean in ["予想人気"] and "予想人気" not in rename_map.values():
-            rename_map[orig_c] = "予想人気"
-        elif (
-            c_clean in ["単勝人気", "人気"]
-            and "単勝人気" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "単勝人気"
-        elif "評価" in c_clean and "評価" not in rename_map.values():
-            rename_map[orig_c] = "評価"
-        elif "軸" in c_clean and "軸" not in rename_map.values():
-            rename_map[orig_c] = "軸"
-        elif "ヒモ" in c_clean and "ヒモ" not in rename_map.values():
-            rename_map[orig_c] = "ヒモ"
-        elif "注" in c_clean and "注" not in rename_map.values():
-            rename_map[orig_c] = "注"
-        elif "切り" in c_clean and "切り" not in rename_map.values():
-            rename_map[orig_c] = "切り"
-        elif (
-            c_clean in ["メモ", "見解", "短評", "コメント"]
-            and "メモ" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "メモ"
-        elif (
-            c_clean in ["回顧", "総評", "回顧メモ"]
-            and "回顧メモ" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "回顧メモ"
-        elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
-            rename_map[orig_c] = "年"
-        elif (
-            c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"]
-            and "レース質展開予想" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "レース質展開予想"
-        elif (
-            c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"]
-            and "推奨買い目" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "推奨買い目"
-        elif (
-            c_clean in ["信頼度", "軸馬信頼度"]
-            and "信頼度" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "信頼度"
-        elif (
-            c_clean in ["波乱度", "波乱度レベル"]
-            and "波乱度" not in rename_map.values()
-        ):
-            rename_map[orig_c] = "波乱度"
-
-    if rename_map:
-        df = df.rename(columns=rename_map)
-
-    df = df.loc[:, ~df.columns.duplicated()]
-
-    if "総合スコア" in df.columns:
-        df["総合スコア"] = (
-            pd.to_numeric(
-                df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
-                errors="coerce",
-            )
-            .fillna(0)
-            .astype(int)
-        )
-
-    def clean_pop_number(val):
-        if pd.isna(val) or val is None:
-            return ""
-        s = str(val).replace("人気", "").strip()
-        m = re.search(r"\d+", s)
-        return int(m.group()) if m else ""
-
-    if "予想人気" in df.columns:
-        df["予想人気"] = df["予想人気"].apply(clean_pop_number)
-    if "単勝人気" in df.columns:
-        df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
-
-    for col in [
-        "評価", "軸", "ヒモ", "注", "切り", "メモ", "総合スコア",
-        "レース質展開予想", "推奨買い目", "信頼度", "波乱度",
-    ]:
-        if col not in df.columns:
-            df[col] = ""
-
-    def calc_eval_and_marks(row):
-        score_val = row.get("総合スコア", 0)
-        try:
-            score = int(float(score_val))
-        except (ValueError, TypeError):
-            score = 0
-
-        current_eval = str(row.get("評価", "")).strip()
-
-        if not current_eval or current_eval in ["-", "nan", "None"]:
-            if score >= 93:
-                current_eval = "S"
-            elif score >= 88:
-                current_eval = "A+"
-            elif score >= 84:
-                current_eval = "A"
-            elif score >= 80:
-                current_eval = "B+"
-            elif score >= 74:
-                current_eval = "B"
-            else:
-                current_eval = "C"
-
-        jiku = str(row.get("軸", "")).strip()
-        himo = str(row.get("ヒモ", "")).strip()
-        chu = str(row.get("注", "")).strip()
-        kiri = str(row.get("切り", "")).strip()
-        memo_raw = str(row.get("メモ", "")).strip()
-
-        if not (jiku or himo or chu or kiri):
-            if "【推奨】" in memo_raw or "【軸】" in memo_raw:
-                jiku = "〇"
-            elif "【ヒモ】" in memo_raw:
-                himo = "〇"
-            elif "【注】" in memo_raw:
-                chu = "〇"
-            elif "【切り】" in memo_raw:
-                kiri = "〇"
-            else:
-                if current_eval in ["S"]:
-                    jiku = "〇"
-                elif current_eval in ["S+", "A+", "A", "B+"]:
-                    himo = "〇"
-                elif current_eval in ["B"]:
-                    chu = "〇"
-                else:
-                    kiri = "〇"
-
-        row["評価"] = current_eval
-        row["軸"] = jiku
-        row["ヒモ"] = himo
-        row["注"] = chu
-        row["切り"] = kiri
-
-        if current_eval in ["S"]:
-            label = "【推奨】"
-        elif current_eval in ["A+", "A", "B+"]:
-            label = "【ヒモ】"
-        elif current_eval in ["B"]:
-            label = "【注】"
-        else:
-            label = "【切り】"
-
-        if "【縦横比較】" in memo_raw and "【反証】" in memo_raw:
-            cleaned_m = re.sub(r"^【(推奨|ヒモ|注|切り)】", "", memo_raw).strip()
-            row["メモ"] = f"{label}{cleaned_m}"
-        else:
-            horse_no = str(row.get("馬番", "")).strip()
-            jiko = (
-                "【縦横比較】"
-                + (
-                    memo_raw
-                    if memo_raw
-                    else (
-                        "過去実績および同条件の適性を比較。展開・馬場バイアスとの適合度を査定。"
-                    )
-                )
-            )
-            pro = "【プロ評価】プロ評価でも評価が分かれる一戦。仕上がり・気配を重視。"
-            time_bp = (
-                "【タイム評価/BP】近走タイム指数（TI）および中間時計を算出・換算。"
-            )
-            fb_wt_rs = (
-                f"【FB/WT/RS】FB:{horse_no}番枠、WT:馬体重順調、RS:脚質適性照合。"
-            )
-
-            if current_eval in ["S", "A+", "A"]:
-                hansho = (
-                    "【反証】重賞の展開過熱によるオーバーペースや、他馬からのマークが厳しくなる懸念あり。"
-                )
-            else:
-                hansho = (
-                    "【反証】格上相手のスピード勝負において追走負荷が高く、決め手比べで見劣るリスクが高い。"
-                )
-
-            special_label = f"【特殊ラベル】{current_eval}評価 / 適性査定済"
-            row["メモ"] = (
-                f"{label}{jiko}{pro}{time_bp}{fb_wt_rs}{hansho}{special_label}"
-            )
-
-        return row
-
-    df = df.apply(calc_eval_and_marks, axis=1)
-
-    existing_years = df["年"].copy() if "年" in df.columns else pd.Series("", index=df.index)
-    years = []
-    current_year = time.strftime("%Y")
-    for pos, (_, row) in enumerate(df.iterrows()):
-        race_name = str(row.get("レース名", "") or "").strip()
-        race_year_match = re.search(r"(20\d{2})", race_name)
-        if race_year_match:
-            year_val = race_year_match.group(1)
-        else:
-            raw_year = str(existing_years.iloc[pos] if pos < len(existing_years) else "").strip()
-            raw_year_match = re.search(r"(20\d{2})", raw_year)
-            year_val = raw_year_match.group(1) if raw_year_match else current_year
-        years.append(year_val)
-
-    if "年" in df.columns:
-        df = df.drop(columns=["年"])
-    df["年"] = years
-    df = df[[col for col in df.columns if col != "年"] + ["年"]]
-
+  if df is None or df.empty:
     return df
+  df = df.copy()
+
+  # 1. 不要な空白列（Unnamed: 0〜19 等）および不要な「総合スコアグラフ」等の列を一括削除
+  drop_target_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+  for drop_col in ["総合スコアグラフ", "軸ヒモ切り", "人気"]:
+    if drop_col in df.columns:
+      drop_target_cols.append(drop_col)
+
+  if drop_target_cols:
+    df = df.drop(columns=list(set(drop_target_cols)), errors="ignore")
+
+  df = df.loc[:, ~df.columns.duplicated()]
+
+  # 2. 列名の自動正規化・表記揺れ吸収
+  rename_map = {}
+  for orig_c in df.columns:
+    c_clean = (
+        str(orig_c).strip().replace(" ", "").replace("\n", "").replace("\r", "")
+    )
+    if (
+        c_clean in ["着順", "確定着順", "順位", "着"]
+        and "確定着順" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "確定着順"
+    elif (
+        c_clean in ["レース名", "レース", "Race", "RACE"]
+        and "レース名" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "レース名"
+    elif (
+        c_clean in ["馬名", "競走馬名", "Horse", "HORSE"]
+        and "馬名" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "馬名"
+    elif (
+        c_clean in ["馬番", "馬No", "馬NO", "No", "NO"]
+        and "馬番" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "馬番"
+    elif c_clean in ["予想人気"] and "予想人気" not in rename_map.values():
+      rename_map[orig_c] = "予想人気"
+    elif (
+        c_clean in ["単勝人気", "人気"]
+        and "単勝人気" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "単勝人気"
+    elif "評価" in c_clean and "評価" not in rename_map.values():
+      rename_map[orig_c] = "評価"
+    elif "軸" in c_clean and "軸" not in rename_map.values():
+      rename_map[orig_c] = "軸"
+    elif "ヒモ" in c_clean and "ヒモ" not in rename_map.values():
+      rename_map[orig_c] = "ヒモ"
+    elif "注" in c_clean and "注" not in rename_map.values():
+      rename_map[orig_c] = "注"
+    elif "切り" in c_clean and "切り" not in rename_map.values():
+      rename_map[orig_c] = "切り"
+    elif (
+        c_clean in ["メモ", "見解", "短評", "コメント"]
+        and "メモ" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "メモ"
+    elif (
+        c_clean in ["回顧", "総評", "回顧メモ"]
+        and "回顧メモ" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "回顧メモ"
+    elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
+      rename_map[orig_c] = "年"
+    elif (
+        c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"]
+        and "レース質展開予想" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "レース質展開予想"
+    elif (
+        c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"]
+        and "推奨買い目" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "推奨買い目"
+    elif (
+        c_clean in ["信頼度", "軸馬信頼度"]
+        and "信頼度" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "信頼度"
+    elif (
+        c_clean in ["波乱度", "波乱度レベル"]
+        and "波乱度" not in rename_map.values()
+    ):
+      rename_map[orig_c] = "波乱度"
+
+  if rename_map:
+    df = df.rename(columns=rename_map)
+
+  df = df.loc[:, ~df.columns.duplicated()]
+
+  # 数値列の調整・クレンジング
+  if "総合スコア" in df.columns:
+    df["総合スコア"] = (
+        pd.to_numeric(
+            df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
+            errors="coerce",
+        )
+        .fillna(0)
+        .astype(int)
+    )
+
+  def clean_pop_number(val):
+    if pd.isna(val) or val is None:
+      return ""
+    s = str(val).replace("人気", "").strip()
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else ""
+
+  if "予想人気" in df.columns:
+    df["予想人気"] = df["予想人気"].apply(clean_pop_number)
+  if "単勝人気" in df.columns:
+    df["単勝人気"] = df["単勝人気"].apply(clean_pop_number)
+
+  # 3. 必須・全頭共通カラムの補完と安全確保
+  for col in [
+      "評価",
+      "軸",
+      "ヒモ",
+      "注",
+      "切り",
+      "メモ",
+      "総合スコア",
+      "レース質展開予想",
+      "推奨買い目",
+      "信頼度",
+      "波乱度",
+  ]:
+    if col not in df.columns:
+      df[col] = ""
+
+  # 4. 1頭ごとの評価判定・印補完・メモ欄（7大要素）自動整形
+  def calc_eval_and_marks(row):
+    score_val = row.get("総合スコア", 0)
+    try:
+      score = int(float(score_val))
+    except (ValueError, TypeError):
+      score = 0
+
+    current_eval = str(row.get("評価", "")).strip()
+
+    if not current_eval or current_eval in ["-", "nan", "None"]:
+      if score >= 93:
+        current_eval = "S"
+      elif score >= 88:
+        current_eval = "A+"
+      elif score >= 84:
+        current_eval = "A"
+      elif score >= 80:
+        current_eval = "B+"
+      elif score >= 74:
+        current_eval = "B"
+      else:
+        current_eval = "C"
+
+    jiku = str(row.get("軸", "")).strip()
+    himo = str(row.get("ヒモ", "")).strip()
+    chu = str(row.get("注", "")).strip()
+    kiri = str(row.get("切り", "")).strip()
+    memo_raw = str(row.get("メモ", "")).strip()
+
+    if not (jiku or himo or chu or kiri):
+      if "【推奨】" in memo_raw or "【軸】" in memo_raw:
+        jiku = "〇"
+      elif "【ヒモ】" in memo_raw:
+        himo = "〇"
+      elif "【注】" in memo_raw:
+        chu = "〇"
+      elif "【切り】" in memo_raw:
+        kiri = "〇"
+      else:
+        if current_eval in ["S"]:
+          jiku = "〇"
+        elif current_eval in ["S+", "A+", "A", "B+"]:
+          himo = "〇"
+        elif current_eval in ["B"]:
+          chu = "〇"
+        else:
+          kiri = "〇"
+
+    row["評価"] = current_eval
+    row["軸"] = jiku
+    row["ヒモ"] = himo
+    row["注"] = chu
+    row["切り"] = kiri
+
+    # メモ欄（T列）ルールVer8.4/8.6準拠の7大詳細要素自動整形
+    if current_eval in ["S"]:
+      label = "【推奨】"
+    elif current_eval in ["A+", "A", "B+"]:
+      label = "【ヒモ】"
+    elif current_eval in ["B"]:
+      label = "【注】"
+    else:
+      label = "【切り】"
+
+    if "【縦横比較】" in memo_raw and "【反証】" in memo_raw:
+      cleaned_m = re.sub(r"^【(推奨|ヒモ|注|切り)】", "", memo_raw).strip()
+      row["メモ"] = f"{label}{cleaned_m}"
+    else:
+      horse_no = str(row.get("馬番", "")).strip()
+      jiko = (
+          "【縦横比較】"
+          + (
+              memo_raw
+              if memo_raw
+              else (
+                  "過去実績および同条件の適性を比較。展開・馬場バイアスとの適合度を査定。"
+              )
+          )
+      )
+      pro = "【プロ評価】プロ評価でも評価が分かれる一戦。仕上がり・気配を重視。"
+      time_bp = (
+          "【タイム評価/BP】近走タイム指数（TI）および中間時計を算出・換算。"
+      )
+      fb_wt_rs = (
+          f"【FB/WT/RS】FB:{horse_no}番枠、WT:馬体重順調、RS:脚質適性照合。"
+      )
+
+      if current_eval in ["S", "A+", "A"]:
+        hansho = (
+            "【反証】重賞の展開過熱によるオーバーペースや、他馬からのマークが厳しくなる懸念あり。"
+        )
+      else:
+        hansho = (
+            "【反証】格上相手のスピード勝負において追走負荷が高く、決め手比べで見劣るリスクが高い。"
+        )
+
+      special_label = f"【特殊ラベル】{current_eval}評価 / 適性査定済"
+      row["メモ"] = (
+          f"{label}{jiko}{pro}{time_bp}{fb_wt_rs}{hansho}{special_label}"
+      )
+
+    return row
+
+  df = df.apply(calc_eval_and_marks, axis=1)
+
+  # 5. 各行のレース名・既存年度を使って「年」を行単位で補完し、必ず最右列へ配置
+  existing_years = df["年"].copy() if "年" in df.columns else pd.Series("", index=df.index)
+  years = []
+  current_year = time.strftime("%Y")
+  for pos, (_, row) in enumerate(df.iterrows()):
+    race_name = str(row.get("レース名", "") or "").strip()
+    # レース名に西暦がある場合は、保存先の誤分類を防ぐためレース名の年度を優先
+    race_year_match = re.search(r"(20\d{2})", race_name)
+    if race_year_match:
+      year_val = race_year_match.group(1)
+    else:
+      raw_year = str(existing_years.iloc[pos] if pos < len(existing_years) else "").strip()
+      raw_year_match = re.search(r"(20\d{2})", raw_year)
+      year_val = raw_year_match.group(1) if raw_year_match else current_year
+    years.append(year_val)
+
+  if "年" in df.columns:
+    df = df.drop(columns=["年"])
+  df["年"] = years
+  df = df[[col for col in df.columns if col != "年"] + ["年"]]
+
+  return df
 
 
 def migrate_and_clean_all_dbs():
     """既存DBをクレンジングし、レースの年度ごとに data/YYYY へ振り分ける。"""
     candidates = []
 
+    # 年度フォルダ側のデータを先に読み込む。後から読むルートDBを新しい値として優先する。
     if os.path.isdir(DATA_DIR):
         for entry in sorted(os.listdir(DATA_DIR)):
             y_dir = os.path.join(DATA_DIR, entry)
@@ -975,6 +1003,7 @@ def migrate_and_clean_all_dbs():
             except Exception:
                 continue
 
+    # ルートDBは最も新しい保存先として最後に追加する
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -998,6 +1027,7 @@ def migrate_and_clean_all_dbs():
         combined = sanitize_dataframe_columns(combined)
         combined.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
+        # 既存年度フォルダ内に別年度の行が混在していた場合も、年度ごとに再分配する。
         if "年" not in combined.columns:
             combined["年"] = combined["レース名"].apply(extract_year_from_race_name) if "レース名" in combined.columns else time.strftime("%Y")
         combined["年"] = combined["年"].astype(str).str.extract(r"(20\d{2})", expand=False).fillna(time.strftime("%Y"))
@@ -1018,17 +1048,18 @@ def migrate_and_clean_all_dbs():
             year_db_path = os.path.join(year_dir, DB_FILE)
             year_df = combined[combined["年"].astype(str) == str(year_val)].copy()
             if year_df.empty:
+                # 清除旧版本误把其他年度写进来的错误文件
                 if os.path.exists(year_db_path):
                     os.remove(year_db_path)
             else:
                 year_df = year_df[[col for col in year_df.columns if col != "年"] + ["年"]]
                 year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
     except Exception:
+        # DBの読み込み障害でアプリ全体を止めない
         pass
 
-
 # ==================================================
-# 📊 Googleスプレッドシート自動連携コアロジック
+# 📊 Googleスプレッドシート自動連携コアロジック（「重賞レース分析」タブ指定版）
 # ==================================================
 
 def get_gspread_client():
@@ -1046,7 +1077,6 @@ def get_gspread_client():
         pass
     return None
 
-
 def load_db_from_sheet():
     """Googleスプレッドシートの「重賞レース分析」タブから全データを読み込む"""
     gc = get_gspread_client()
@@ -1062,7 +1092,6 @@ def load_db_from_sheet():
         return sanitize_dataframe_columns(df)
     except Exception:
         return pd.DataFrame()
-
 
 import traceback
 
@@ -1083,12 +1112,14 @@ def save_db_to_sheet(df):
         clean_df = sanitize_dataframe_columns(df)
         clean_df = clean_df.fillna("").astype(str)
         
+        # 1. 現在スプレッドシートに入力されている全行を取得
         all_rows = worksheet.get_all_values()
         non_empty_rows = [row for row in all_rows if any(cell.strip() for cell in row)]
         
         header = clean_df.columns.tolist()
         new_data = clean_df.values.tolist()
         
+        # シートが完全に空の場合（初回の書き込み）
         if not non_empty_rows:
             values_to_write = [header] + new_data
             worksheet.update('A1', values_to_write)
@@ -1102,6 +1133,7 @@ def save_db_to_sheet(df):
             st.toast(f"✅ 入力済みデータの末尾（{next_start_row + 1}行目〜）に1行空けて追記完了しました！")
 
     except Exception as e:
+        # エラーの具体的な内容を画面上に赤文字でそのまま吐き出す！
         st.error(f"❌ スプレッドシート同期エラーが発生しました！")
         st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレース】:\n{traceback.format_exc()}")
 
@@ -1111,10 +1143,12 @@ def load_db(selected_year=None):
         selected_year = f"{time.strftime('%Y')}年"
     migrate_and_clean_all_dbs()
 
+    # 1. まずスプレッドシートから最新データを取得
     sheet_df = load_db_from_sheet()
     if not sheet_df.empty:
         combined = sheet_df
     else:
+        # スプレッドシートが空の場合はローカルCSV群から取得
         all_dfs = []
 
         year_2026_file = os.path.join(DATA_DIR, "2026", DB_FILE)
@@ -1181,6 +1215,32 @@ def load_db(selected_year=None):
 
     return combined
 
+def save_to_db(new_df):
+    if new_df is None or new_df.empty:
+        return load_db()
+
+    clean_save_df = sanitize_dataframe_columns(new_df)
+    if "レース名" not in clean_save_df.columns:
+        return load_db("全期間")
+
+    # 1. 既存データベースと新規データの統合（重複レースの差し替え）
+    current_db = load_db(selected_year="全期間")
+    save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
+    
+    if not current_db.empty and "レース名" in current_db.columns:
+        current_db = current_db[~current_db["レース名"].astype(str).str.strip().isin(save_races)]
+    
+    combined = pd.concat([current_db, clean_save_df], ignore_index=True, sort=False)
+    combined = sanitize_dataframe_columns(combined)
+    
+    # 2. ローカルCSVへ保存
+    combined.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
+
+    # 3. Googleスプレッドシートの「重賞レース分析」タブへ自動同期書き込み（★ここが永久保存！）
+    save_db_to_sheet(combined)
+
+    return combined
+
 
 def get_available_years_in_db():
     df = load_db(selected_year="全期間")
@@ -1200,9 +1260,11 @@ def save_to_db(new_df):
         st.warning("⚠️ レース名がないため、年度別保存を実行できませんでした。")
         return load_db("全期間")
 
+    # 新規保存対象のレース名を取り出す（同じレースの古い行を置き換える）
     save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
     save_races = [r for r in save_races if r]
 
+    # 1. ルート直下のマスターDBを更新
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -1221,6 +1283,7 @@ def save_to_db(new_df):
     combined_root = combined_root[[col for col in combined_root.columns if col != "年"] + ["年"]]
     combined_root.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
+    # 2. データを行ごとの「年」でグループ化して、自動で年度フォルダを作成・更新
     if "年" not in clean_save_df.columns:
         clean_save_df["年"] = clean_save_df["レース名"].apply(extract_year_from_race_name)
     clean_save_df["年"] = clean_save_df["年"].astype(str).str.extract(r"(20\d{2})", expand=False).fillna(time.strftime("%Y"))
@@ -1259,12 +1322,10 @@ def save_to_db(new_df):
         combined_year_df = combined_year_df[[col for col in combined_year_df.columns if col != "年"] + ["年"]]
         combined_year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
-    save_db_to_sheet(combined_root)
-
+    # 再読込時にも既存ファイルを年度別に再整理する
     unique_years = clean_save_df["年"].dropna().astype(str).unique().tolist()
     selected_year = f"{unique_years[0]}年" if len(unique_years) == 1 else "全期間"
     return load_db(selected_year=selected_year)
-
 
 def update_db_with_recap(race_name, result_df, memo_text):
     if not os.path.exists(DB_FILE):
@@ -1312,6 +1373,7 @@ def update_db_with_recap(race_name, result_df, memo_text):
         df = sanitize_dataframe_columns(df)
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
+        # 年度フォルダには、その年度のデータだけを保存（別年度の行を混在させない）
         year_val = extract_year_from_race_name(race_name)
         if "年" in df.columns and mask.any():
             saved_year = str(df.loc[mask, "年"].iloc[0]).strip()
@@ -1657,6 +1719,7 @@ def analyze_data_with_gemini(
 # --------------------------------------------------
 
 def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text, add_media_parts, model_name):
+    """既存の評価データ＋直前追加情報（パドック・馬体重）を統合し、見解・買い目・スコアの修正／現状維持を自動判定"""
     client = genai.Client(api_key=api_key)
 
     race_title = current_df["レース名"].iloc[0] if "レース名" in current_df.columns else "対象レース"
@@ -1751,6 +1814,7 @@ def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text
 
 
 def render_re_evaluation_section(current_df, active_rules, selected_model):
+    """評価画面内に直前追加データによる再評価・微調整UIを描画"""
     race_name_val = current_df['レース名'].iloc[0] if "レース名" in current_df.columns else "対象レース"
     
     with st.expander("🔄 【直前追加データ】パドック・馬体重・直前情報による再評価・見解/買い目修正", expanded=False):
@@ -1804,9 +1868,12 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
                         else:
                             updated_df = parse_json_ai_output(raw_json)
                             if not updated_df.empty:
+                                # 1. データベース（スプレッドシート/ローカルDB）を最新版で上書き保存
                                 save_to_db(updated_df)
+                                # 2. メイン画面で参照している分析データフレームを即座に更新
                                 st.session_state["analyzed_df"] = updated_df
                                 st.success(f"🎉 **【直前データを反映完了】**\n\n{summary_msg}")
+                                # 3. 画面をリロードして、メイン画面の総合スコア・印・全テーブル・買い目・見解を最新化
                                 st.rerun()
 
                     except Exception as e:
@@ -1942,7 +2009,7 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         
         if st.button("🚀 本日の勝負5R（メインR＋厳選4R）を一括判定実行", use_container_width=True, type="primary"):
             if not api_key:
-                st.error("⚠️ 設定メニューで Gemini API Key を設定してください！")
+                st.error("⚠️ サイドバーで Gemini API Key を設定してください！")
             elif len(draft_list) < 1:
                 st.warning("⚠️ 下書き保存されたレースデータがありません。")
             else:
@@ -2244,12 +2311,14 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
         st.info("🔗 **レース名入り評価結果 専用共有URL（コピーして共有できます）:**")
         st.code(share_url, language="text")
 
+        # 直前追加データによる再評価・見解/買い目修正UIの描画（管理画面でのみ表示）
         active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
         render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
+    # サマリー本文描画処理
     def render_summary_body():
         st.markdown(
-            f"<h2 style='text-align: center; color: #1b5e20; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
+            f"<h2 style='text-align: center; color: #f39c12; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
             unsafe_allow_html=True,
         )
 
@@ -2351,7 +2420,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 "馬名": st.column_config.TextColumn("馬名", width="medium"),
                 "予想人気": st.column_config.TextColumn("予想人気", width="small"),
                 "総合スコア": st.column_config.ProgressColumn(
-                    "指数合計値", format="%d点", min_value=0, max_value=100, color="#1b5e20"
+                    "指数合計値", format="%d点", min_value=0, max_value=100, color="#0bce0e"
                 ),
             }
 
@@ -2389,7 +2458,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
             st.markdown(
                 f"""
-                <div style="background-color: #0f172a; border: 2px solid #1b5e20; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(27, 94, 32, 0.3);">
+                <div style="background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);">
 {tenkai_text}
                 </div>
                 """,
@@ -2412,6 +2481,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                     unsafe_allow_html=True,
                 )
 
+        # 管理・通常閲覧モード時のタブ構成
     view_tab1, view_tab2 = st.tabs(
         ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
     )
@@ -2430,7 +2500,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             "馬名": st.column_config.TextColumn("馬名", width="medium"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium", color="#1b5e20"
+                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium", color="#0bce0e"
             ),
             "評価": st.column_config.TextColumn("評価", width="small"),
             "出馬表点": st.column_config.NumberColumn("出馬表点", width="small"),
@@ -2463,140 +2533,77 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一）
+# 🎨 デザインCSS定義
 # --------------------------------------------------
 
-selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
-
-if selected_theme == "ライトモード":
-    theme_css = """
-    .main { background-color: #f8f9fa !important; color: #212529 !important; }
-    .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
-    .card-title, .card-horse-name { color: #111827 !important; }
-    """
-elif selected_theme == "システムに合わせる":
-    theme_css = """
-    @media (prefers-color-scheme: light) {
-        .main { background-color: #f8f9fa !important; color: #212529 !important; }
-        .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
-        .card-title, .card-horse-name { color: #111827 !important; }
-    }
-    """
-else:
-    theme_css = """
-    .main { background-color: #080a0f !important; color: #f1f5f9 !important; }
-    """
-
 st.markdown(
-    f"""
+    """
 <style>
-    /* 全幅レイアウト */
-    [data-testid="stAppViewContainer"] {{
+    [data-testid="stAppViewContainer"] {
         width: 100% !important;
-    }}
+    }
     .main .block-container,
     div[data-testid="stMainBlockContainer"],
     div[data-testid="stAppViewBlockContainer"],
-    section.main > div {{
-        max-width: 99% !important;
-        width: 99% !important;
-        padding-left: 0.8rem !important;
-        padding-right: 0.8rem !important;
-        padding-top: 0.8rem !important;
-    }}
+    section.main > div {
+        max-width: 98% !important;
+        width: 98% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1.5rem !important;
+    }
 
-    /* サイドバーの非表示（完全全幅化） */
-    [data-testid="stSidebar"] {{
-        display: none !important;
-    }}
-    div[data-testid="stSidebarCollapseButton"] {{
-        display: none !important;
-    }}
+    .main { background-color: #080a0f; }
+    h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
 
-    {theme_css}
-
-    /* メインタイトル 競馬ブックグリーン */
-    .app-main-title {{
-        color: #1b5e20 !important;
-        font-size: 2.2rem !important;
-        font-weight: 800 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        letter-spacing: -0.5px;
-    }}
-
-    /* アクションボタン 競馬ブックグリーン（深緑）統一 */
-    div.stButton > button,
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-primary"],
-    div[data-testid="stPopover"] > button {{
-        background-color: #1b5e20 !important;
-        background: #1b5e20 !important;
-        color: #ffffff !important;
-        border: 1px solid #2e7d32 !important;
-        font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(27, 94, 32, 0.4) !important;
-        border-radius: 6px !important;
-    }}
-    div.stButton > button:hover,
-    button[data-testid="stBaseButton-secondary"]:hover,
-    button[data-testid="stBaseButton-primary"]:hover,
-    div[data-testid="stPopover"] > button:hover {{
-        background-color: #2e7d32 !important;
-        background: #2e7d32 !important;
-        border-color: #4caf50 !important;
-        box-shadow: 0 0 12px rgba(46, 125, 50, 0.7) !important;
-    }}
-
-    /* 横型ナビゲーションバーデザイン */
-    div[data-testid="stRadio"] > div[role="radiogroup"] {{
-        background-color: #1b5e20 !important;
-        padding: 6px 10px !important;
-        border-radius: 8px !important;
-        gap: 6px !important;
-        flex-wrap: wrap !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
-        background-color: rgba(255, 255, 255, 0.12) !important;
-        padding: 6px 14px !important;
-        border-radius: 6px !important;
-        color: #ffffff !important;
-        font-weight: bold !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
-        background-color: rgba(255, 255, 255, 0.25) !important;
-        cursor: pointer;
-    }}
-
-    div[data-testid="stDataFrame"] div[role="progressbar"] {{
+    div[data-testid="stDataFrame"] div[role="progressbar"] {
         height: 14px !important;
         border-radius: 4px !important;
         background-color: #1e2638 !important;
-    }}
-    div[data-testid="stDataFrame"] div[role="progressbar"] > div {{
-        background: #1b5e20 !important;
+    }
+    div[data-testid="stDataFrame"] div[role="progressbar"] > div {
+        background: #0bce0e !important;
         border-radius: 4px !important;
-    }}
-
-    .risk-card {{
+    }
+    
+    /* アクションボタン オレンジ系統一 */
+    div.stButton > button,
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-primary"] {
+        background-color: #d84315 !important;
+        background: #d84315 !important;
+        color: #ffffff !important;
+        border: 1px solid #ff5722 !important;
+        font-weight: bold !important;
+        box-shadow: 0 2px 5px rgba(216, 67, 21, 0.4) !important;
+    }
+    div.stButton > button:hover,
+    button[data-testid="stBaseButton-secondary"]:hover,
+    button[data-testid="stBaseButton-primary"]:hover {
+        background-color: #bf360c !important;
+        background: #bf360c !important;
+        border-color: #ff7043 !important;
+        box-shadow: 0 0 12px rgba(255, 87, 34, 0.7) !important;
+    }
+    
+    .risk-card {
         background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
-        border: 2px solid #1b5e20; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 15px;
-    }}
-    .honmei-card {{
-        background: linear-gradient(135deg, #1b3a1e 0%, #2e7d32 100%);
-        border: 2px solid #4caf50; border-radius: 10px; padding: 15px; margin-bottom: 15px;
-    }}
-    .anaba-card {{
+        border: 2px solid #00f0ff; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 15px; box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+    }
+    .honmei-card {
+        background: linear-gradient(135deg, #2b1e00 0%, #4a3500 100%);
+        border: 2px solid #f39c12; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 0 15px rgba(243, 156, 18, 0.4);
+    }
+    .anaba-card {
         background: linear-gradient(135deg, #3a0007 0%, #5c000b 100%);
-        border: 2px solid #e74c3c; border-radius: 10px; padding: 15px; margin-bottom: 15px;
-    }}
-    .kaime-card-item {{
-        background: #111622; border: 2px solid #1b5e20; border-left: 6px solid #2e7d32; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff;
-    }}
-    .recap-box {{
+        border: 2px solid #e74c3c; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 0 15px rgba(231, 76, 60, 0.4);
+    }
+    .kaime-card-item {
+        background: #111622; border: 2px solid #ffd700; border-left: 6px solid #ffd700; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff; box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+    }
+    .recap-box {
         background-color: #0d1117;
-        border: 2px solid #1b5e20;
+        border: 2px solid #10b981;
         border-radius: 10px;
         padding: 20px;
         margin-bottom: 25px;
@@ -2604,9 +2611,11 @@ st.markdown(
         line-height: 1.8;
         color: #e6edf3;
         font-size: 1.0rem;
-    }}
-    .card-title {{ font-size: 1.05rem; font-weight: bold; color: #ffffff; }}
-    .card-horse-name {{ 
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
+    }
+    .card-title { font-size: 1.05rem; font-weight: bold; color: #ffffff; }
+    
+    .card-horse-name { 
         font-size: 1.4rem !important; 
         font-weight: bold; 
         color: #ffffff; 
@@ -2614,9 +2623,10 @@ st.markdown(
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-    }}
-    .card-val-gold {{ font-size: 2.0rem; font-weight: bold; color: #f39c12; }}
-    .card-val-red {{ font-size: 2.0rem; font-weight: bold; color: #ff4d4d; }}
+    }
+    
+    .card-val-gold { font-size: 2.0rem; font-weight: bold; color: #f39c12; }
+    .card-val-red { font-size: 2.0rem; font-weight: bold; color: #ff4d4d; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -2632,6 +2642,14 @@ mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
 if mode_param == "share" and race_param:
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] { display: none !important; }
+        div[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        .main .block-container { max-width: 100% !important; padding-top: 1rem !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
     db_df = load_db(selected_year="全期間")
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
@@ -2663,7 +2681,7 @@ elif "race" in query_params and not mode_param:
 
 
 # --------------------------------------------------
-# 🧭 トップヘッダー ＆ 横型ナビゲーション ＆ 設定ポップオーバー
+# 🧭 メインUI構成 ＆ ナビゲーション
 # --------------------------------------------------
 
 if "g1_text_val" not in st.session_state:
@@ -2696,18 +2714,34 @@ if "draft_toast_msg" in st.session_state:
         st.error(msg_text)
         st.toast(msg_text, icon="❌")
 
-col_head_left, col_head_right = st.columns([4, 1])
+st.markdown("<div style='padding-top: 15px;'></div>", unsafe_allow_html=True)
 
-with col_head_left:
-    st.markdown("<h1 class='app-main-title'>Umael-Pro</h1>", unsafe_allow_html=True)
-    st.caption(
-        "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
+st.title("ウマエルプロ Ver 3.0")
+st.caption(
+    "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
+)
+
+with st.sidebar:
+    st.header("🧭 ナビゲーション")
+
+    selected_menu = st.radio(
+        "移動する機能を選択してください：",
+        [
+            "📋 レース分析・予想",
+            "🏇 現地観戦用（勝負5R厳選）",
+            "⚙️ ルール管理・アップデート",
+            "🔄 回顧・精度検証",
+            "📊 評価データ一覧（プール）",
+            "📝 回顧・精度検証一覧（プール）",
+            "🗄 過去馬データベース（プール）",
+            "📥 過去CSVデータ取込",
+        ],
+        index=0,
     )
 
-with col_head_right:
-    with st.popover("☰ 設定", use_container_width=True):
-        st.markdown("### ⚙️ システム設定")
+    st.divider()
 
+    with st.expander("⚙️ システム設定", expanded=False):
         saved_key = load_api_key()
         api_key = st.text_input(
             "Gemini API Key",
@@ -2725,43 +2759,8 @@ with col_head_right:
             index=0,
             help="現行推奨モデル: gemini-3.8-flash",
         )
-
-        st.divider()
-
-        st.radio(
-            "🌗 画面モード",
-            ["ダークモード", "ライトモード", "システムに合わせる"],
-            index=0,
-            key="theme_mode_setting",
-            help="画面全体の明るさ・テーマを切り替えます",
-        )
-
-        st.divider()
         st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
-        st.caption("ℹ️ システムバージョン: Ver 3.0")
-
-# 競馬ブック風 横一列ナビゲーションバー
-menu_options = [
-    "📋 レース分析・予想",
-    "🏇 現地観戦用（勝負5R厳選）",
-    "⚙️ ルール管理・アップデート",
-    "🔄 回顧・精度検証",
-    "📊 評価データ一覧（プール）",
-    "📝 回顧・精度検証一覧（プール）",
-    "🗄 過去馬データベース（プール）",
-    "📥 過去CSVデータ取込",
-]
-
-selected_menu = st.radio(
-    "移動する機能を選択してください：",
-    menu_options,
-    index=0,
-    horizontal=True,
-    label_visibility="collapsed",
-)
-
-st.divider()
 
 
 # --------------------------------------------------
@@ -2953,7 +2952,7 @@ if selected_menu == "📋 レース分析・予想":
             ):
                 active_key = load_api_key()
                 if not active_key:
-                    st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` または設定メニューで入力してください！")
+                    st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！")
                 else:
                     pdf_opt_val = (
                         "1ページ目のみ"
@@ -3085,7 +3084,7 @@ if selected_menu == "📋 レース分析・予想":
         if st.button("🔥 AI分析を実行する", use_container_width=True):
             active_key = load_api_key()
             if not active_key:
-                st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` または設定メニューで入力してください！")
+                st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！")
             elif (
                 not files_group1
                 and not files_group2
@@ -3398,7 +3397,7 @@ elif selected_menu == "🔄 回顧・精度検証":
         ):
             active_key = load_api_key()
             if not active_key:
-                st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` または設定メニューで入力してください！")
+                st.error("⚠️ Gemini API Key が設定されていません。`st.secrets` またはシステム設定で入力してください！")
             elif not res_text_input and not res_file_inputs:
                 st.warning("⚠️ 結果テキストのコピペまたはファイルを1つ以上読み込ませてください！")
             else:
@@ -3686,7 +3685,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 
         if not recap_races:
             st.warning("⚠️ 回顧・着順データが保存されているレースがまだありません。")
-            st.info("💡 「🔄 回顧・精度検証」メニューからレース結果を取り込むと、ここに自動プールされます！")
+            st.info("💡 サイドバーの「🔄 回顧・精度検証」メニューからレース結果を取り込むと、ここに自動プールされます！")
             target_race_options = all_races
         else:
             st.success(f"📦 回顧・検証済みレース: 全 {len(recap_races)} 件")
@@ -3738,7 +3737,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 disp_result_df.style.apply(highlight_ranks_view, axis=1),
                 column_config={
                     "総合スコア": st.column_config.ProgressColumn(
-                        "総合スコア", format="%d点", min_value=0, max_value=100, color="#1b5e20"
+                        "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
                     ),
                 },
                 use_container_width=True,
@@ -3816,6 +3815,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         all_races_in_db = (
             db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
         )
+        # デフォルトで「🌐 すべてのレース（全件一括表示）」を先頭＆インデックス0に設定
         race_selector_options = ["🌐 すべてのレース（全件一括表示）"] + all_races_in_db
 
         selected_db_race = st.selectbox(
@@ -3846,11 +3846,14 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "単勝人気": st.column_config.TextColumn("単勝人気", width="small"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100, color="#1b5e20"
+                "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
             ),
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
 
+        # --------------------------------------------------
+        # 1. 特定レース選択時
+        # --------------------------------------------------
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)]
             
@@ -3866,8 +3869,10 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 ] if c in filtered_df.columns
             ]
             
+            # その他の未指定カラムを抽出（「年」は除外）
             extra_cols = [c for c in filtered_df.columns if c not in single_race_cols and c != "年"]
             
+            # 最後に「年」を一番右端に確実にセット
             final_cols = single_race_cols + extra_cols
             if "年" in filtered_df.columns:
                 final_cols.append("年")
@@ -3907,6 +3912,9 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     use_container_width=True,
                 )
 
+        # --------------------------------------------------
+        # 2. 🌐 すべてのレース（全件一括表示）※デフォルト表示
+        # --------------------------------------------------
         else:
             st.markdown("### 🌐 プール済み全レース・全頭一覧")
             
@@ -3921,6 +3929,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             
             extra_all_cols = [c for c in disp_db_df.columns if c not in cols_order and c != "年"]
             
+            # 最後に「年」を一番右端に確実にセット
             final_all_cols = cols_order + extra_all_cols
             if "年" in disp_db_df.columns:
                 final_all_cols.append("年")
@@ -3963,7 +3972,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             )
     else:
         st.info("💡 まだプールされたデータはありません。")
-
 
 # --------------------------------------------------
 # 📥 8. 過去CSVデータ取込 メニュー
