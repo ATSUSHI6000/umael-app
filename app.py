@@ -1103,7 +1103,7 @@ def save_db_to_sheet(df):
 
     except Exception as e:
         st.error(f"❌ スプレッドシート同期エラーが発生しました！")
-        st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレーサ】:\n{traceback.format_exc()}")
+        st.code(f"【エラー原因】:\n{e}\n\n【詳細スタックトレース】:\n{traceback.format_exc()}")
 
 
 def load_db(selected_year=None):
@@ -2249,7 +2249,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
     def render_summary_body():
         st.markdown(
-            f"<h2 style='text-align: center; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
+            f"<h2 style='text-align: center; color: #1b5e20; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
             unsafe_allow_html=True,
         )
 
@@ -2259,11 +2259,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 <div class="card-title" style="font-size:1.2rem; margin-bottom:10px;">🔥 レース展開 ＆ 波乱度判定</div>
                 <div style="display:flex; justify-content:space-around; align-items:center; flex-wrap:wrap; gap:15px;">
                     <div style="flex:1; min-width:180px; text-align:center;">
-                        <span style="font-size:0.9rem;">軸馬信頼度</span><br>
+                        <span style="color:#aaa; font-size:0.9rem;">軸馬信頼度</span><br>
                         <b style="font-size:1.5rem; color:#00f0ff;">{jiku_rank}</b>
                     </div>
                     <div style="flex:1; min-width:180px; text-align:center;">
-                        <span style="font-size:0.9rem;">波乱度レベル</span><br>
+                        <span style="color:#aaa; font-size:0.9rem;">波乱度レベル</span><br>
                         <b style="font-size:1.5rem; color:#ffd700;">{risk_level}</b>
                     </div>
                 </div>
@@ -2286,11 +2286,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div class="card-horse-name">【{h_num}】{h_name}</div>
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem;">想定人気</span><br>
-                                    <b style="font-size:1.3rem;">{h_pop} 人気</b>
+                                    <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
+                                    <b style="font-size:1.3rem; color:#fff;">{h_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem;">指数合計値</span><br>
+                                    <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                                     <b class="card-val-gold">{h_score}</b>
                                 </div>
                             </div>
@@ -2311,11 +2311,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div class="card-horse-name">【{a_num}】{a_name}</div>
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem;">想定人気</span><br>
-                                    <b style="font-size:1.3rem;">{a_pop} 人気</b>
+                                    <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
+                                    <b style="font-size:1.3rem; color:#fff;">{a_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem;">指数合計値</span><br>
+                                    <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                                     <b class="card-val-red">{a_score}</b>
                                 </div>
                             </div>
@@ -2389,7 +2389,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
             st.markdown(
                 f"""
-                <div style="border: 2px solid #1b5e20; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; font-size: 1.0rem; box-shadow: 0 0 15px rgba(27, 94, 32, 0.3);">
+                <div style="background-color: #0f172a; border: 2px solid #1b5e20; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(27, 94, 32, 0.3);">
 {tenkai_text}
                 </div>
                 """,
@@ -2463,183 +2463,34 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 画面モード＆デザインCSS定義（緑要素白文字固定 ＆ 設定ポップオーバー最適化）
+# 🎨 画面モード＆デザインCSS定義（競馬ブックグリーン統一）
 # --------------------------------------------------
 
 selected_theme = st.session_state.get("theme_mode_setting", "ダークモード")
 
 if selected_theme == "ライトモード":
     theme_css = """
-    /* ライトモード背景＆基本文字色 */
-    [data-testid="stAppViewContainer"], .main, .stApp { 
-        background-color: #f8f9fa !important; 
-        color: #111827 !important; 
-    }
-    
-    /* 入力・ウィジェットラベル文字色 */
-    [data-testid="stWidgetLabel"],
-    [data-testid="stWidgetLabel"] p,
-    [data-testid="stWidgetLabel"] span,
-    label[data-testid="stWidgetLabel"],
-    .stSelectbox label, .stSelectbox label p,
-    .stTextInput label, .stTextInput label p,
-    .stFileUploader label, .stFileUploader label p,
-    .stTextArea label, .stTextArea label p {
-        color: #111827 !important;
-        font-weight: 700 !important;
-    }
-
-    /* 見出しテキスト色 */
-    h1, h2, h3, h4, h5, h6,
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
-        color: #111827 !important;
-        font-weight: 800 !important;
-        letter-spacing: -0.5px;
-    }
-
-    /* ライトモード時の通常のラジオボタン項目（白背景部分）テキスト色 */
-    div[data-testid="stRadio"] label,
-    div[data-testid="stRadio"] label p,
-    div[data-testid="stRadio"] label span {
-        color: #111827 !important;
-        font-weight: 600 !important;
-    }
-
-    /* ライトモード時の設定（Popover）ボタン：白背景・黒文字・ホバーでグレー */
-    html body div[data-testid="stPopover"] button,
-    html body button[data-testid="stPopoverButton"] {
-        background-color: #ffffff !important;
-        background: #ffffff !important;
-        color: #111827 !important;
-        border: 1px solid #d1d5db !important;
-    }
-    html body div[data-testid="stPopover"] button *,
-    html body button[data-testid="stPopoverButton"] * {
-        color: #111827 !important;
-    }
-    html body div[data-testid="stPopover"] button:hover,
-    html body button[data-testid="stPopoverButton"]:hover {
-        background-color: #e5e7eb !important;
-        background: #e5e7eb !important;
-        color: #111827 !important;
-        border-color: #d1d5db !important;
-    }
-    html body div[data-testid="stPopover"] button:hover *,
-    html body button[data-testid="stPopoverButton"]:hover * {
-        color: #111827 !important;
-    }
-
-    .risk-card, .honmei-card, .anaba-card { 
-        background: #ffffff !important; 
-        color: #111827 !important; 
-        border: 1px solid #e5e7eb !important;
-    }
+    .main { background-color: #f8f9fa !important; color: #212529 !important; }
+    .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
     .card-title, .card-horse-name { color: #111827 !important; }
-    .kaime-card-item { background: #ffffff !important; color: #111827 !important; border: 1px solid #d1d5db !important; }
-    .recap-box { background-color: #ffffff !important; color: #111827 !important; border: 1px solid #d1d5db !important; }
     """
-
 elif selected_theme == "システムに合わせる":
     theme_css = """
     @media (prefers-color-scheme: light) {
-        [data-testid="stAppViewContainer"], .main, .stApp { background-color: #f8f9fa !important; color: #111827 !important; }
-        [data-testid="stWidgetLabel"] p, label p, label span { color: #111827 !important; font-weight: 700 !important; }
-        h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #111827 !important; font-weight: 800 !important; }
-        div[data-testid="stRadio"] label p, div[data-testid="stRadio"] label span { color: #111827 !important; }
-        html body div[data-testid="stPopover"] button,
-        html body button[data-testid="stPopoverButton"] {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #111827 !important;
-            border: 1px solid #d1d5db !important;
-        }
-        html body div[data-testid="stPopover"] button *,
-        html body button[data-testid="stPopoverButton"] * { color: #111827 !important; }
-        html body div[data-testid="stPopover"] button:hover,
-        html body button[data-testid="stPopoverButton"]:hover {
-            background-color: #e5e7eb !important;
-            background: #e5e7eb !important;
-            color: #111827 !important;
-            border-color: #d1d5db !important;
-        }
-        html body div[data-testid="stPopover"] button:hover *,
-        html body button[data-testid="stPopoverButton"]:hover * { color: #111827 !important; }
-        .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #111827 !important; }
+        .main { background-color: #f8f9fa !important; color: #212529 !important; }
+        .risk-card, .honmei-card, .anaba-card { background: #ffffff !important; color: #212529 !important; }
         .card-title, .card-horse-name { color: #111827 !important; }
-        .kaime-card-item, .recap-box { background: #ffffff !important; color: #111827 !important; }
-    }
-    @media (prefers-color-scheme: dark) {
-        [data-testid="stAppViewContainer"], .main, .stApp { background-color: #0b0e14 !important; color: #ffffff !important; }
-        [data-testid="stWidgetLabel"] p, label p, label span { color: #ffffff !important; font-weight: 600 !important; }
-        h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #ffffff !important; font-weight: 800 !important; }
-        div[data-testid="stRadio"] label p, div[data-testid="stRadio"] label span { color: #ffffff !important; }
-        html body div[data-testid="stPopover"] button,
-        html body button[data-testid="stPopoverButton"] {
-            background-color: #262730 !important;
-            background: #262730 !important;
-            color: #ffffff !important;
-            border: 1px solid #4b5563 !important;
-        }
-        html body div[data-testid="stPopover"] button *,
-        html body button[data-testid="stPopoverButton"] * { color: #ffffff !important; }
-        html body div[data-testid="stPopover"] button:hover,
-        html body button[data-testid="stPopoverButton"]:hover {
-            background-color: #262730 !important;
-            background: #262730 !important;
-            color: #ffffff !important;
-            border-color: #4b5563 !important;
-        }
-        html body div[data-testid="stPopover"] button:hover *,
-        html body button[data-testid="stPopoverButton"]:hover * { color: #ffffff !important; }
     }
     """
-
 else:
-    # ダークモード（デフォルト）
     theme_css = """
-    [data-testid="stAppViewContainer"], .main, .stApp { background-color: #0b0e14 !important; color: #ffffff !important; }
-    [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] span,
-    label[data-testid="stWidgetLabel"], .stSelectbox label p, .stTextInput label p, .stFileUploader label p, .stTextArea label p {
-        color: #ffffff !important; font-weight: 600 !important;
-    }
-    h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { 
-        color: #ffffff !important; 
-        font-weight: 800 !important; 
-        letter-spacing: -0.5px;
-    }
-    div[data-testid="stRadio"] label, div[data-testid="stRadio"] label p, div[data-testid="stRadio"] label span {
-        color: #ffffff !important; font-weight: 600 !important;
-    }
-
-    /* ダークモード時の設定（Popover）ボタン：グレー背景・白文字・ホバー変更なし */
-    html body div[data-testid="stPopover"] button,
-    html body button[data-testid="stPopoverButton"] {
-        background-color: #262730 !important;
-        background: #262730 !important;
-        color: #ffffff !important;
-        border: 1px solid #4b5563 !important;
-    }
-    html body div[data-testid="stPopover"] button *,
-    html body button[data-testid="stPopoverButton"] * {
-        color: #ffffff !important;
-    }
-    html body div[data-testid="stPopover"] button:hover,
-    html body button[data-testid="stPopoverButton"]:hover {
-        background-color: #262730 !important;
-        background: #262730 !important;
-        color: #ffffff !important;
-        border-color: #4b5563 !important;
-    }
-    html body div[data-testid="stPopover"] button:hover *,
-    html body button[data-testid="stPopoverButton"]:hover * {
-        color: #ffffff !important;
-    }
+    .main { background-color: #080a0f !important; color: #f1f5f9 !important; }
     """
 
 st.markdown(
     f"""
 <style>
-    /* 全幅レイアウト＆上部見切れ防止の余白設定 */
+    /* 全幅レイアウト */
     [data-testid="stAppViewContainer"] {{
         width: 100% !important;
     }}
@@ -2647,8 +2498,8 @@ st.markdown(
     div[data-testid="stMainBlockContainer"],
     div[data-testid="stAppViewBlockContainer"],
     section.main > div {{
-        max-width: 100% !important;
-        width: 100% !important;
+        max-width: 99% !important;
+        width: 99% !important;
         padding-left: 0.8rem !important;
         padding-right: 0.8rem !important;
         padding-top: 0.8rem !important;
@@ -2664,130 +2515,21 @@ st.markdown(
 
     {theme_css}
 
-    /* 🟢【赤枠指定】緑色背景のラジオボタン要素・ナビゲーション・緑ボタン上の文字色を「完全白文字（#ffffff）」に固定保持 */
-    div[data-testid="stRadio"] > div[role="radiogroup"] label,
-    div[data-testid="stRadio"] > div[role="radiogroup"] label *,
-    div[data-testid="stRadio"] > div[role="radiogroup"] span,
-    div[data-testid="stRadio"] > div[role="radiogroup"] p,
-    .header-banner *,
-    div[data-testid="stAlert"] *,
-    div[data-testid="stAlert"] p,
-    div[data-testid="stAlert"] span,
-    div[data-testid="stAlert"] div,
-    .stAlert p, .stAlert div, .stAlert span,
-    div.stButton > button *,
-    button[data-testid="stBaseButton-secondary"] *,
-    button[data-testid="stBaseButton-primary"] * {{
-        color: #ffffff !important;
-        fill: #ffffff !important;
-    }}
-
-    /* ⚙️ 設定ポップオーバー（Popover）内の可視性・文字反転修正 */
-    div[data-testid="stPopoverBody"],
-    div[data-baseweb="popover"],
-    div[role="dialog"] {{
-        background-color: #ffffff !important;
-        border: 1px solid #d1d5db !important;
-        border-radius: 12px !important;
-        color: #111827 !important;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2) !important;
-    }}
-    div[data-testid="stPopoverBody"] *,
-    div[data-baseweb="popover"] *,
-    div[role="dialog"] * {{
-        color: #111827 !important;
-    }}
-    div[data-testid="stPopoverBody"] h1,
-    div[data-testid="stPopoverBody"] h2,
-    div[data-testid="stPopoverBody"] h3,
-    div[data-testid="stPopoverBody"] h4,
-    div[data-testid="stPopoverBody"] label,
-    div[data-testid="stPopoverBody"] label p,
-    div[data-testid="stPopoverBody"] span,
-    div[data-testid="stPopoverBody"] div {{
-        color: #111827 !important;
-        font-weight: bold !important;
-    }}
-    /* ポップオーバー内の入力エリア */
-    div[data-testid="stPopoverBody"] input,
-    div[data-testid="stPopoverBody"] div[data-baseweb="select"] > div {{
-        background-color: #f3f4f6 !important;
-        color: #111827 !important;
-        border-color: #d1d5db !important;
-    }}
-
-    /* ポップオーバー内の緑色要素（画面モードラジオボタン選択エリア等）は白文字をそのまま維持 */
-    div[data-testid="stPopoverBody"] div[data-testid="stRadio"] > div[role="radiogroup"],
-    div[data-testid="stPopoverBody"] div[data-testid="stRadio"] > div[role="radiogroup"] * {{
-        background-color: #113819 !important;
-        color: #ffffff !important;
-    }}
-
-    /* ヘッダー帯デザイン（イメージ画像再現） */
-    .header-banner {{
-        background-color: #113819 !important;
-        padding: 16px 20px 10px 20px !important;
-        border-radius: 10px 10px 0 0 !important;
-        margin-bottom: 0px !important;
-    }}
-
+    /* メインタイトル 競馬ブックグリーン */
     .app-main-title {{
-        color: #ffffff !important;
-        font-size: 2.5rem !important;
-        font-weight: 900 !important;
+        color: #1b5e20 !important;
+        font-size: 2.2rem !important;
+        font-weight: 800 !important;
         margin: 0 !important;
         padding: 0 !important;
         letter-spacing: -0.5px;
-        line-height: 1.1;
     }}
 
-    .app-sub-title {{
-        color: #e0e6ed !important;
-        font-size: 0.95rem !important;
-        margin-top: 6px !important;
-        margin-bottom: 10px !important;
-        line-height: 1.3;
-    }}
-
-    /* 横型ナビゲーションバーデザイン */
-    div[data-testid="stRadio"] > div[role="radiogroup"] {{
-        background-color: #154520 !important;
-        padding: 6px 10px !important;
-        border-radius: 8px !important;
-        gap: 6px !important;
-        flex-wrap: wrap !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
-        background-color: transparent !important;
-        padding: 6px 14px !important;
-        border-radius: 6px !important;
-        color: #ffffff !important;
-        font-weight: bold !important;
-        border: none !important;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
-        background-color: rgba(255, 255, 255, 0.2) !important;
-        cursor: pointer;
-    }}
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label[aria-checked="true"],
-    div[data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {{
-        background-color: #2e7d32 !important;
-        color: #ffffff !important;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
-    }}
-
-    /* st.info / stAlert 内のスタイル設定 */
-    div[data-testid="stAlert"],
-    div[data-testid="stNotification"] {{
-        background-color: #1b5e20 !important;
-        border: 1px solid #2e7d32 !important;
-        border-radius: 8px !important;
-    }}
-
-    /* アクションボタン 競馬ブックグリーン（深緑）統一（設定ポップオーバーボタンは除外） */
-    div.stButton > button:not([data-testid="stPopoverButton"]),
-    button[data-testid="stBaseButton-secondary"]:not([data-testid="stPopoverButton"]),
-    button[data-testid="stBaseButton-primary"]:not([data-testid="stPopoverButton"]) {{
+    /* アクションボタン 競馬ブックグリーン（深緑）統一 */
+    div.stButton > button,
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-primary"],
+    div[data-testid="stPopover"] > button {{
         background-color: #1b5e20 !important;
         background: #1b5e20 !important;
         color: #ffffff !important;
@@ -2796,37 +2538,35 @@ st.markdown(
         box-shadow: 0 2px 5px rgba(27, 94, 32, 0.4) !important;
         border-radius: 6px !important;
     }}
-    div.stButton > button:not([data-testid="stPopoverButton"]):hover,
-    button[data-testid="stBaseButton-secondary"]:not([data-testid="stPopoverButton"]):hover,
-    button[data-testid="stBaseButton-primary"]:not([data-testid="stPopoverButton"]):hover {{
+    div.stButton > button:hover,
+    button[data-testid="stBaseButton-secondary"]:hover,
+    button[data-testid="stBaseButton-primary"]:hover,
+    div[data-testid="stPopover"] > button:hover {{
         background-color: #2e7d32 !important;
         background: #2e7d32 !important;
         border-color: #4caf50 !important;
         box-shadow: 0 0 12px rgba(46, 125, 50, 0.7) !important;
     }}
 
-    /* ⚙️ 設定ポップオーバーボタンの最高優先度スタイル（ダーク/ライト完全上書き） */
-    html body div[data-testid="stPopover"] button,
-    html body button[data-testid="stPopoverButton"] {{
-        background-color: {"#ffffff" if selected_theme == "ライトモード" else "#262730"} !important;
-        background: {"#ffffff" if selected_theme == "ライトモード" else "#262730"} !important;
-        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
-        border: 1px solid {"#d1d5db" if selected_theme == "ライトモード" else "#4b5563"} !important;
+    /* 横型ナビゲーションバーデザイン */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {{
+        background-color: #1b5e20 !important;
+        padding: 6px 10px !important;
+        border-radius: 8px !important;
+        gap: 6px !important;
+        flex-wrap: wrap !important;
     }}
-    html body div[data-testid="stPopover"] button *,
-    html body button[data-testid="stPopoverButton"] * {{
-        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
+        background-color: rgba(255, 255, 255, 0.12) !important;
+        padding: 6px 14px !important;
+        border-radius: 6px !important;
+        color: #ffffff !important;
+        font-weight: bold !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
     }}
-    html body div[data-testid="stPopover"] button:hover,
-    html body button[data-testid="stPopoverButton"]:hover {{
-        background-color: {"#e5e7eb" if selected_theme == "ライトモード" else "#262730"} !important;
-        background: {"#e5e7eb" if selected_theme == "ライトモード" else "#262730"} !important;
-        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
-        border-color: {"#d1d5db" if selected_theme == "ライトモード" else "#4b5563"} !important;
-    }}
-    html body div[data-testid="stPopover"] button:hover *,
-    html body button[data-testid="stPopoverButton"]:hover * {{
-        color: {"#111827" if selected_theme == "ライトモード" else "#ffffff"} !important;
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
+        background-color: rgba(255, 255, 255, 0.25) !important;
+        cursor: pointer;
     }}
 
     div[data-testid="stDataFrame"] div[role="progressbar"] {{
@@ -2852,7 +2592,7 @@ st.markdown(
         border: 2px solid #e74c3c; border-radius: 10px; padding: 15px; margin-bottom: 15px;
     }}
     .kaime-card-item {{
-        background: #111622; border: 2px solid #1b5e20; border-left: 6px solid #2e7d32; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem;
+        background: #111622; border: 2px solid #1b5e20; border-left: 6px solid #2e7d32; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff;
     }}
     .recap-box {{
         background-color: #0d1117;
@@ -2862,12 +2602,14 @@ st.markdown(
         margin-bottom: 25px;
         white-space: pre-wrap;
         line-height: 1.8;
+        color: #e6edf3;
         font-size: 1.0rem;
     }}
-    .card-title {{ font-size: 1.05rem; font-weight: bold; }}
+    .card-title {{ font-size: 1.05rem; font-weight: bold; color: #ffffff; }}
     .card-horse-name {{ 
         font-size: 1.4rem !important; 
         font-weight: bold; 
+        color: #ffffff; 
         margin: 6px 0;
         white-space: nowrap;
         overflow: hidden;
@@ -2954,20 +2696,13 @@ if "draft_toast_msg" in st.session_state:
         st.error(msg_text)
         st.toast(msg_text, icon="❌")
 
-# トップヘッダー帯（ロゴ統合版）
-st.markdown('<div class="header-banner">', unsafe_allow_html=True)
 col_head_left, col_head_right = st.columns([4, 1])
 
 with col_head_left:
-    col_logo, col_text = st.columns([0.8, 3.2])
-    with col_logo:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
-        else:
-            st.markdown("🏇", unsafe_allow_html=True)
-    with col_text:
-        st.markdown("<h1 class='app-main-title' style='margin:0;'>Umael-Pro</h1>", unsafe_allow_html=True)
-        st.markdown("<div class='app-sub-title' style='margin-top:2px;'>馬柱・血統・予想オッズ・競馬ブック・馬場情報<br>一括AI解析＆Webプール＆現地観戦厳選</div>", unsafe_allow_html=True)
+    st.markdown("<h1 class='app-main-title'>Umael-Pro</h1>", unsafe_allow_html=True)
+    st.caption(
+        "馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選"
+    )
 
 with col_head_right:
     with st.popover("☰ 設定", use_container_width=True):
@@ -3004,9 +2739,9 @@ with col_head_right:
         st.divider()
         st.caption("🔑 st.secrets / APIキー自動設定機能オン")
         st.caption("📱 スマホ表示対応モード動作中")
-        st.caption("ℹ️ システムバージョン: Ver 3.1")
+        st.caption("ℹ️ システムバージョン: Ver 3.0")
 
-# 横一列ナビゲーションバー
+# 競馬ブック風 横一列ナビゲーションバー
 menu_options = [
     "📋 レース分析・予想",
     "🏇 現地観戦用（勝負5R厳選）",
@@ -3025,7 +2760,6 @@ selected_menu = st.radio(
     horizontal=True,
     label_visibility="collapsed",
 )
-st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -3087,7 +2821,7 @@ if selected_menu == "📋 レース分析・予想":
                 default_idx = existing_drafts.index(st.session_state["selected_draft_race"]) + 1
 
             draft_choice = st.selectbox(
-                "保存・編集する対象レースを選択（新規または既存）：",
+                "📂 保存・編集する対象レースを選択（新規または既存）：",
                 ["✨ 【新規レースとして保存（馬柱からレース名自動判定）】"] + existing_drafts,
                 index=default_idx,
                 key="draft_race_select_box"
@@ -3095,7 +2829,7 @@ if selected_menu == "📋 レース分析・予想":
             
             if draft_choice == "✨ 【新規レースとして保存（馬柱からレース名自動判定）】":
                 draft_race_name = st.text_input(
-                    "レース名を手動指定する場合（※空欄ならファイル名から自動設定されます）",
+                    "✏️ レース名を手動指定する場合（※空欄ならファイル名から自動設定されます）",
                     "",
                 )
                 display_target_name = draft_race_name.strip() if draft_race_name.strip() else "✨ 新規レース（自動判定）"
@@ -3121,7 +2855,7 @@ if selected_menu == "📋 レース分析・予想":
                     st.caption("まだ保存されているファイルはありません。")
 
     st.divider()
-    st.subheader("📂 データのアップロード")
+    st.subheader("📂 データのアップロード (.txt / .csv / .pdf / .png / .jpg / URL)")
 
     uploader_ver = st.session_state["uploader_key_ver"]
 
@@ -3129,7 +2863,7 @@ if selected_menu == "📋 レース分析・予想":
 
     with col1:
         files_group1 = st.file_uploader(
-            "1. 出馬表・枠順・近5走・血統",
+            "1. 出馬表・枠順・近5走・血統 (.txt / .csv / .pdf / .png / .jpg)",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg1_{uploader_ver}",
@@ -3137,15 +2871,21 @@ if selected_menu == "📋 レース分析・予想":
 
     with col2:
         files_group2 = st.file_uploader(
-            "2. 競馬ブック・調教データ",
-            type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
+            "2. 競馬ブック・調教データ (.pdf / .png / .jpg)",
+            type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg2_{uploader_ver}",
+        )
+        pdf_page_opt = st.radio(
+            "📄 競馬ブックPDFの読み込み範囲",
+            ["1ページ目のみ（推奨）", "全ページ読み込む"],
+            index=0,
+            key="pdf_page_opt",
         )
 
     with col3:
         files_group3 = st.file_uploader(
-            "3. 当日・前日の傾向・馬場情報",
+            "3. 当日・前日の傾向・馬場情報 (.txt / .csv / .pdf / .png / .jpg)",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg3_{uploader_ver}",
@@ -3153,19 +2893,11 @@ if selected_menu == "📋 レース分析・予想":
 
     with col4:
         files_group4 = st.file_uploader(
-            "4. その他各種データ",
+            "4. その他各種データ (.txt / .csv / .pdf / .png / .jpg)",
             type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"fg4_{uploader_ver}",
         )
-
-    pdf_page_opt = st.radio(
-        "競馬ブックPDFの読み込み範囲",
-        ["1ページ目のみ（推奨）", "全ページ読み込む"],
-        index=0,
-        horizontal=True,
-        key="pdf_page_opt",
-    )
 
     st.write("")
     urls_group5_input = st.text_area(
