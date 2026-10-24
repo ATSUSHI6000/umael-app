@@ -2955,7 +2955,7 @@ if selected_menu == "📋 レース分析・予想":
     st.divider()
     st.subheader("📂 データのアップロード (.txt / .csv / .pdf / .png / .jpg / .jpeg / URL)")
 
-    uploader_ver = st.session_state["uploader_key_ver"]
+    uploader_ver = st.session_state.get("uploader_key_ver", 0)
 
     # 4つのアップロード枠を並列配置（ラベルから形式表記を削除してスッキリ化）
     col1, col2, col3, col4 = st.columns(4)
