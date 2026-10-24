@@ -2006,26 +2006,31 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
         st.warning("⚠️ 有効な出走馬データが見つかりませんでした。")
         return
 
+    # 1. 総合スコアが高い順（S→C, 高得点→低得点）に降順ソート
+    if "総合スコア" in df.columns:
+        df["_sort_score"] = pd.to_numeric(
+            df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
+            errors="coerce"
+        ).fillna(0).astype(int)
+        df = df.sort_values(by="_sort_score", ascending=False).drop(columns=["_sort_score"]).reset_index(drop=True)
+
     race_title = (
         df["レース名"].iloc[0]
         if "レース名" in df.columns and not df.empty
         else "競馬予想解析"
     )
-    
-    view_df = df.drop(
-        columns=["レース名", "信頼度", "波乱度", "レース質展開予想", "推奨買い目", "確定着順", "回顧メモ", "軸ヒモ切り", "人気", "年度"],
-        errors="ignore",
-    ).fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
+    # 2. 表示用カラムを正規カラムのみに厳格カット（余計な重複カラムは100%遮断）
     target_order = [
         "馬番", "馬名", "総合スコア", "評価", "予想人気",
         "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
         "軸", "ヒモ", "注", "切り", "メモ"
     ]
-    existing_cols = [c for c in target_order if c in view_df.columns]
-    other_cols = [c for c in view_df.columns if c not in target_order and c != "年"]
-    year_cols = ["年"] if "年" in view_df.columns else []
-    view_df = view_df[existing_cols + other_cols + year_cols]
+    if "年" in df.columns:
+        target_order.append("年")
+
+    strict_cols = [c for c in target_order if c in df.columns]
+    view_df = df[strict_cols].copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
     honmei_horse = view_df.iloc[0] if not view_df.empty else None
     h_score = safe_int(honmei_horse.get("総合スコア", 0)) if honmei_horse is not None else 0
@@ -2139,9 +2144,10 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
         active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
         render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
+    # サマリー描画関数
     def render_summary_body():
         st.markdown(
-            f"<h2 style='text-align: center; color: #10b981; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
+            f"<h2 style='text-align: center; color: #f39c12; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
             unsafe_allow_html=True,
         )
 
@@ -2151,12 +2157,12 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 <div class="card-title" style="font-size:1.2rem; margin-bottom:10px;">🔥 レース展開 ＆ 波乱度判定</div>
                 <div style="display:flex; justify-content:space-around; align-items:center; flex-wrap:wrap; gap:15px;">
                     <div style="flex:1; min-width:180px; text-align:center;">
-                        <span style="font-size:0.9rem; opacity:0.8;">軸馬信頼度</span><br>
-                        <b style="font-size:1.5rem; color:#10b981;">{jiku_rank}</b>
+                        <span style="color:#aaa; font-size:0.9rem;">軸馬信頼度</span><br>
+                        <b style="font-size:1.5rem; color:#00f0ff;">{jiku_rank}</b>
                     </div>
                     <div style="flex:1; min-width:180px; text-align:center;">
-                        <span style="font-size:0.9rem; opacity:0.8;">波乱度レベル</span><br>
-                        <b style="font-size:1.5rem; color:#f59e0b;">{risk_level}</b>
+                        <span style="color:#aaa; font-size:0.9rem;">波乱度レベル</span><br>
+                        <b style="font-size:1.5rem; color:#ffd700;">{risk_level}</b>
                     </div>
                 </div>
             </div>
@@ -2178,11 +2184,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div class="card-horse-name">【{h_num}】{h_name}</div>
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem; opacity:0.8;">想定人気</span><br>
-                                    <b style="font-size:1.3rem;">{h_pop} 人気</b>
+                                    <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
+                                    <b style="font-size:1.3rem; color:#fff;">{h_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem; opacity:0.8;">指数合計値</span><br>
+                                    <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                                     <b class="card-val-gold">{h_score}</b>
                                 </div>
                             </div>
@@ -2203,11 +2209,11 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div class="card-horse-name">【{a_num}】{a_name}</div>
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem; opacity:0.8;">想定人気</span><br>
-                                    <b style="font-size:1.3rem;">{a_pop} 人気</b>
+                                    <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
+                                    <b style="font-size:1.3rem; color:#fff;">{a_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
-                                    <span style="font-size:0.85rem; opacity:0.8;">指数合計値</span><br>
+                                    <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
                                     <b class="card-val-red">{a_score}</b>
                                 </div>
                             </div>
@@ -2243,7 +2249,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                 "馬名": st.column_config.TextColumn("馬名", width="medium"),
                 "予想人気": st.column_config.TextColumn("予想人気", width="small"),
                 "総合スコア": st.column_config.ProgressColumn(
-                    "指数合計値", format="%d点", min_value=0, max_value=100, color="#10b981"
+                    "指数合計値", format="%d点", min_value=0, max_value=100, color="#0bce0e"
                 ),
             }
 
@@ -2281,7 +2287,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             st.subheader("🏁 レース質 ＆ 展開予想シミュレーション")
             st.markdown(
                 f"""
-                <div class="tenkai-box">
+                <div style="background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 18px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.7; color: #f1f5f9; font-size: 1.0rem; box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);">
 {tenkai_text}
                 </div>
                 """,
@@ -2322,7 +2328,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
             "馬名": st.column_config.TextColumn("馬名", width="medium"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium", color="#10b981"
+                "総合スコア", format="%d点", min_value=0, max_value=100, width="medium", color="#0bce0e"
             ),
             "評価": st.column_config.TextColumn("評価", width="small"),
             "出馬表点": st.column_config.NumberColumn("出馬表点", width="small"),
