@@ -3755,7 +3755,8 @@ elif selected_menu == "📊 評価データ一覧（プール）":
     if db_df.empty:
         st.info("💡 選択された年度にデータベースデータがありません。")
     else:
-        all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+        # 過去馬データベース同様に昇順ソートして並び順を完全統一
+        all_races = sorted([str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
 
         eval_race_options = ["--- 🎯 レースを選択してください ---"] + all_races
 
@@ -3791,24 +3792,26 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
     if db_df.empty:
         st.info("💡 選択された年度に予想・回顧データが見つかりません。")
     else:
+        # 過去馬データベース同様に昇順ソートして並び順を完全統一
+        all_races_sorted = sorted([str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
+
         if "回顧メモ" in db_df.columns or "確定着順" in db_df.columns:
             recap_mask = (
                 (db_df.get("回顧メモ", pd.Series([""]*len(db_df))).astype(str).str.strip() != "") |
                 (db_df.get("確定着順", pd.Series([""]*len(db_df))).astype(str).str.strip() != "")
             )
-            recap_races = db_df[recap_mask]["レース名"].unique().tolist() if "レース名" in db_df.columns else []
-            all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
+            recap_races = sorted([str(r).strip() for r in db_df[recap_mask]["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
         else:
             recap_races = []
-            all_races = db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
 
         if not recap_races:
             st.warning("⚠️ 回顧・着順データが保存されているレースがまだありません。")
-            st.info("💡 「🔄 回顧・精度検証」メニューからレース結果を取り込むと、ここに自動プールされます！")
-            target_race_options = all_races
+            st.info("💡 サイドバーの「🔄 回顧・精度検証」メニューからレース結果を取り込むと、ここに自動プールされます！")
+            target_race_options = all_races_sorted
         else:
             st.success(f"📦 回顧・検証済みレース: 全 {len(recap_races)} 件")
-            target_race_options = recap_races + [r for r in all_races if r not in recap_races]
+            other_races = [r for r in all_races_sorted if r not in recap_races]
+            target_race_options = recap_races + other_races
 
         recap_race_options = ["--- 🎯 レースを選択してください ---"] + target_race_options
 
@@ -3829,30 +3832,23 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 if non_empty:
                     recap_text = str(non_empty[0]).strip()
 
+            # 重複カラムが出ないよう明確に指定（「年」を最後にする）
             target_cols = [
                 c for c in [
                     "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
-                    "単勝人気", "確定オッズ", "タイム", "上り3F", "勝因・敗因ショートメモ"
+                    "単勝人気", "確定オッズ", "タイム", "上り3F", "勝因・敗因ショートメモ", "年"
                 ] if c in race_df.columns
             ]
-            if "年" in race_df.columns:
-                target_cols.append("年")
             disp_result_df = race_df[target_cols].copy()
 
             def highlight_ranks_view(row):
                 rank_val = normalize_rank(row.get("確定着順", ""))
                 if rank_val == "1":
-                    return [
-                        "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
-                    ] * len(row)
+                    return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
                 elif rank_val == "2":
-                    return [
-                        "background-color: #223344; color: #00ffff; font-weight: bold;"
-                    ] * len(row)
+                    return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
                 elif rank_val == "3":
-                    return [
-                        "background-color: #332211; color: #ffaa55; font-weight: bold;"
-                    ] * len(row)
+                    return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
                 return [""] * len(row)
 
             st.markdown(f"### 🏆 【{selected_recap_race}】 全頭確定着順 ＆ 照合結果")
@@ -3862,7 +3858,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 disp_result_df.style.apply(highlight_ranks_view, axis=1),
                 column_config={
                     "総合スコア": st.column_config.ProgressColumn(
-                        "総合スコア", format="%d点", min_value=0, max_value=100, color="#10b981"
+                        "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
                     ),
                 },
                 use_container_width=True,
@@ -3952,22 +3948,15 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         st.write("")
 
         disp_db_df = db_df.copy().fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
-        disp_db_df = disp_db_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore")
 
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
             if rank_val == "1":
-                return [
-                    "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
-                ] * len(row)
+                return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
             elif rank_val == "2":
-                return [
-                    "background-color: #223344; color: #00ffff; font-weight: bold;"
-                ] * len(row)
+                return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
             elif rank_val == "3":
-                return [
-                    "background-color: #332211; color: #ffaa55; font-weight: bold;"
-                ] * len(row)
+                return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
             return [""] * len(row)
 
         db_col_config = {
@@ -3976,12 +3965,13 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "単勝人気": st.column_config.TextColumn("単勝人気", width="small"),
             "予想人気": st.column_config.TextColumn("予想人気", width="small"),
             "総合スコア": st.column_config.ProgressColumn(
-                "総合スコア", format="%d点", min_value=0, max_value=100, color="#10b981"
+                "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
             ),
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
 
-        csv_cols_order = [
+        # 表示のカラム定義（「年」を最右端にして余計な重複カラムは100%カット）
+        clean_strict_cols = [
             c for c in [
                 "確定着順", "レース名", "馬番", "馬名", "予想人気", "総合スコア", "評価",
                 "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
@@ -3990,9 +3980,8 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 "勝因・敗因ショートメモ", "回顧メモ", "年"
             ] if c in disp_db_df.columns
         ]
-        extra_cols = [c for c in disp_db_df.columns if c not in csv_cols_order]
-        full_cols_order = csv_cols_order + extra_cols
 
+        # 1. 特定レース選択時
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)].copy()
             
@@ -4003,7 +3992,7 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
 
             st.markdown(f"### 🏇 【{selected_db_race}】 解析データ（出走頭数: {len(filtered_df)}頭）")
 
-            disp_single_df = filtered_df.reindex(columns=full_cols_order)
+            disp_single_df = filtered_df[[c for c in clean_strict_cols if c in filtered_df.columns]]
             disp_single_df = disp_single_df[disp_single_df["馬名"].astype(str).str.strip() != ""].dropna(how="all").reset_index(drop=True)
 
             calc_db_single_height = min(800, (len(disp_single_df) + 1) * 38 + 40)
@@ -4038,10 +4027,11 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     use_container_width=True,
                 )
 
+        # 2. 🌐 すべてのレース（全件一括表示）
         else:
             st.markdown("### 🌐 プール済み全レース・全頭一覧")
             
-            disp_db_df = disp_db_df.reindex(columns=full_cols_order)
+            disp_db_df = disp_db_df[[c for c in clean_strict_cols if c in disp_db_df.columns]]
 
             if "レース名" in disp_db_df.columns:
                 if "総合スコア" in disp_db_df.columns:
