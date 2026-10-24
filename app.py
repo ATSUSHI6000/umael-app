@@ -3333,6 +3333,8 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
 
     with sub_tab1:
         st.markdown("#### 🏆 G1専用ルールのアップロード ＆ 保存")
+        current_g1_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+        
         col_g1_1, col_g1_2 = st.columns([2, 1])
 
         with col_g1_1:
@@ -3343,19 +3345,24 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
                 if st.button(
                     "📥 アップロードしたテキストを画面に読み込む", key="btn_load_g1"
                 ):
-                    st.session_state["g1_text_val"] = up_g1.read().decode(
-                        "utf-8", errors="ignore"
-                    )
+                    loaded_text = up_g1.read().decode("utf-8", errors="ignore")
+                    save_rules_to_file(RULE_G1_FILE, loaded_text)
+                    st.session_state["g1_text_val"] = loaded_text
+                    st.success("📥 読み込みとファイル保存が完了しました！")
                     st.rerun()
 
         with col_g1_2:
             if st.button("🔄 G1初期ルールに戻す", key="btn_g1_def"):
-                st.session_state["g1_text_val"] = DEFAULT_G1_RULES
                 save_rules_to_file(RULE_G1_FILE, DEFAULT_G1_RULES)
+                st.session_state["g1_text_val"] = DEFAULT_G1_RULES
                 st.rerun()
 
-        st.text_area(
-            "G1専用ルールテキスト（直接編集可能）", height=300, key="g1_text_val"
+        g1_display_val = st.session_state.get("g1_text_val", current_g1_rule)
+        g1_input_text = st.text_area(
+            "G1専用ルールテキスト（直接編集可能）",
+            value=g1_display_val,
+            height=300,
+            key="g1_text_area_input"
         )
 
         if st.button(
@@ -3363,11 +3370,111 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
             use_container_width=True,
             key="save_g1_btn",
         ):
-            rule_content = st.session_state["g1_text_val"]
-            if rule_content.strip():
-                save_rules_to_file(RULE_G1_FILE, rule_content)
+            if g1_input_text.strip():
+                save_rules_to_file(RULE_G1_FILE, g1_input_text)
+                st.session_state["g1_text_val"] = g1_input_text
                 st.success(
                     "🎉 G1専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
+                )
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    with sub_tab2:
+        st.markdown("#### 🏇 平場・G2・G3専用ルールのアップロード ＆ 保存")
+        current_gen_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+        
+        col_gen_1, col_gen_2 = st.columns([2, 1])
+
+        with col_gen_1:
+            up_gen = st.file_uploader(
+                "平場・G2・G3用ルールテキスト (.txt)",
+                type=["txt"],
+                key="up_gen_file",
+            )
+            if up_gen is not None:
+                if st.button(
+                    "📥 アップロードしたテキストを画面に読み込む", key="btn_load_gen"
+                ):
+                    loaded_text = up_gen.read().decode("utf-8", errors="ignore")
+                    save_rules_to_file(RULE_GENERAL_FILE, loaded_text)
+                    st.session_state["gen_text_val"] = loaded_text
+                    st.success("📥 読み込みとファイル保存が完了しました！")
+                    st.rerun()
+
+        with col_gen_2:
+            if st.button("🔄 平場・G2・G3初期ルールに戻す", key="btn_gen_def"):
+                save_rules_to_file(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+                st.session_state["gen_text_val"] = DEFAULT_GENERAL_RULES
+                st.rerun()
+
+        gen_display_val = st.session_state.get("gen_text_val", current_gen_rule)
+        gen_input_text = st.text_area(
+            "平場・G2・G3専用ルールテキスト（直接編集可能）",
+            value=gen_display_val,
+            height=300,
+            key="gen_text_area_input"
+        )
+
+        if st.button(
+            "💾 平場・G2・G3専用ルールとして更新・保存する",
+            use_container_width=True,
+            key="save_gen_btn",
+        ):
+            if gen_input_text.strip():
+                save_rules_to_file(RULE_GENERAL_FILE, gen_input_text)
+                st.session_state["gen_text_val"] = gen_input_text
+                st.success(
+                    "🎉 平場・G2・G3専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
+                )
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    with sub_tab3:
+        st.markdown("#### 🌾 北海道・洋芝専用ルールのアップロード ＆ 保存")
+        current_hok_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+        
+        col_hok_1, col_hok_2 = st.columns([2, 1])
+
+        with col_hok_1:
+            up_hok = st.file_uploader(
+                "北海道・洋芝用ルールテキスト (.txt)",
+                type=["txt"],
+                key="up_hok_file",
+            )
+            if up_hok is not None:
+                if st.button(
+                    "📥 アップロードしたテキストを画面に読み込む", key="btn_load_hok"
+                ):
+                    loaded_text = up_hok.read().decode("utf-8", errors="ignore")
+                    save_rules_to_file(RULE_HOKKAIDO_FILE, loaded_text)
+                    st.session_state["hok_text_val"] = loaded_text
+                    st.success("📥 読み込みとファイル保存が完了しました！")
+                    st.rerun()
+
+        with col_hok_2:
+            if st.button("🔄 北海道・洋芝初期ルールに戻す", key="btn_hok_def"):
+                save_rules_to_file(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+                st.session_state["hok_text_val"] = DEFAULT_HOKKAIDO_RULES
+                st.rerun()
+
+        hok_display_val = st.session_state.get("hok_text_val", current_hok_rule)
+        hok_input_text = st.text_area(
+            "北海道・洋芝専用ルールテキスト（直接編集可能）",
+            value=hok_display_val,
+            height=300,
+            key="hok_text_area_input"
+        )
+
+        if st.button(
+            "💾 北海道・洋芝専用ルールとして更新・保存する",
+            use_container_width=True,
+            key="save_hok_btn",
+        ):
+            if hok_input_text.strip():
+                save_rules_to_file(RULE_HOKKAIDO_FILE, hok_input_text)
+                st.session_state["hok_text_val"] = hok_input_text
+                st.success(
+                    "🎉 北海道・洋芝専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
                 )
             else:
                 st.error("⚠️ 空のルールは保存できません。")
