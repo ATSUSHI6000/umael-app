@@ -3662,15 +3662,15 @@ elif selected_menu == "🔄 回顧・精度検証":
                             rank_val = normalize_rank(row.get("確定着順", ""))
                             if rank_val == "1":
                                 return [
-                                    "background-color: rgba(245, 158, 11, 0.2); color: #f59e0b; font-weight: bold;"
+                                    "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
                                 ] * len(row)
                             elif rank_val == "2":
                                 return [
-                                    "background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; font-weight: bold;"
+                                    "background-color: #223344; color: #00ffff; font-weight: bold;"
                                 ] * len(row)
                             elif rank_val == "3":
                                 return [
-                                    "background-color: rgba(239, 68, 68, 0.2); color: #ef4444; font-weight: bold;"
+                                    "background-color: #332211; color: #ffaa55; font-weight: bold;"
                                 ] * len(row)
                             return [""] * len(row)
 
@@ -3825,11 +3825,17 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
             def highlight_ranks_view(row):
                 rank_val = normalize_rank(row.get("確定着順", ""))
                 if rank_val == "1":
-                    return ["background-color: rgba(245, 158, 11, 0.2); color: #f59e0b; font-weight: bold;"] * len(row)
+                    return [
+                        "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
+                    ] * len(row)
                 elif rank_val == "2":
-                    return ["background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; font-weight: bold;"] * len(row)
+                    return [
+                        "background-color: #223344; color: #00ffff; font-weight: bold;"
+                    ] * len(row)
                 elif rank_val == "3":
-                    return ["background-color: rgba(239, 68, 68, 0.2); color: #ef4444; font-weight: bold;"] * len(row)
+                    return [
+                        "background-color: #332211; color: #ffaa55; font-weight: bold;"
+                    ] * len(row)
                 return [""] * len(row)
 
             st.markdown(f"### 🏆 【{selected_recap_race}】 全頭確定着順 ＆ 照合結果")
@@ -3934,11 +3940,17 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
         def db_highlight_ranks(row):
             rank_val = normalize_rank(row.get("確定着順", ""))
             if rank_val == "1":
-                return ["background-color: rgba(245, 158, 11, 0.2); color: #f59e0b; font-weight: bold;"] * len(row)
+                return [
+                    "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
+                ] * len(row)
             elif rank_val == "2":
-                return ["background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; font-weight: bold;"] * len(row)
+                return [
+                    "background-color: #223344; color: #00ffff; font-weight: bold;"
+                ] * len(row)
             elif rank_val == "3":
-                return ["background-color: rgba(239, 68, 68, 0.2); color: #ef4444; font-weight: bold;"] * len(row)
+                return [
+                    "background-color: #332211; color: #ffaa55; font-weight: bold;"
+                ] * len(row)
             return [""] * len(row)
 
         db_col_config = {
