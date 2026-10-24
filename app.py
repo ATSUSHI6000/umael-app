@@ -3755,7 +3755,6 @@ elif selected_menu == "📊 評価データ一覧（プール）":
     if db_df.empty:
         st.info("💡 選択された年度にデータベースデータがありません。")
     else:
-        # 過去馬データベース同様に昇順ソートして並び順を完全統一
         all_races = sorted([str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
 
         eval_race_options = ["--- 🎯 レースを選択してください ---"] + all_races
@@ -3770,6 +3769,14 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         if selected_eval_race and selected_eval_race != "--- 🎯 レースを選択してください ---":
             matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
             if not matched_df.empty:
+                # 総合スコア降順（S→C, 高得点→低得点）に確実にソート
+                if "総合スコア" in matched_df.columns:
+                    matched_df["_sort_score"] = pd.to_numeric(
+                        matched_df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
+                        errors="coerce"
+                    ).fillna(0).astype(int)
+                    matched_df = matched_df.sort_values(by="_sort_score", ascending=False).drop(columns=["_sort_score"]).reset_index(drop=True)
+                
                 render_race_evaluation_view(matched_df, is_viewer_mode=False, show_chat=True)
             else:
                 st.error(f"⚠️ 選択されたレース「{selected_eval_race}」のデータが見つかりませんでした。")
@@ -3792,7 +3799,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
     if db_df.empty:
         st.info("💡 選択された年度に予想・回顧データが見つかりません。")
     else:
-        # 過去馬データベース同様に昇順ソートして並び順を完全統一
         all_races_sorted = sorted([str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip() != ""]) if "レース名" in db_df.columns else []
 
         if "回顧メモ" in db_df.columns or "確定着順" in db_df.columns:
@@ -3825,6 +3831,14 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         if selected_recap_race and selected_recap_race != "--- 🎯 レースを選択してください ---":
             race_df = db_df[db_df["レース名"].astype(str) == str(selected_recap_race)].copy()
 
+            # 総合スコア降順（S→C, 高得点→低得点）に確実にソート
+            if "総合スコア" in race_df.columns:
+                race_df["_sort_score"] = pd.to_numeric(
+                    race_df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
+                    errors="coerce"
+                ).fillna(0).astype(int)
+                race_df = race_df.sort_values(by="_sort_score", ascending=False).drop(columns=["_sort_score"]).reset_index(drop=True)
+
             recap_text = ""
             if "回顧メモ" in race_df.columns:
                 recap_memos = race_df["回顧メモ"].dropna().unique()
@@ -3832,7 +3846,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
                 if non_empty:
                     recap_text = str(non_empty[0]).strip()
 
-            # 重複カラムが出ないよう明確に指定（「年」を最後にする）
             target_cols = [
                 c for c in [
                     "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
