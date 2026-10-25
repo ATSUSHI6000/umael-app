@@ -3364,37 +3364,38 @@ elif selected_menu == "🔄 回顧・精度検証":
     if db_df.empty:
         st.info("💡 過去馬データベースに予想データがありません。「📋 レース分析・予想」で解析を実行してください！")
     else:
-        # 確定着順が未入力の「評価出し済み・未回顧レース」のみを自動抽出
-        if "確定着順" in db_df.columns:
-            unrecap_races = []
-            for r in db_df["レース名"].dropna().unique():
-                r_str = str(r).strip()
-                if not r_str:
-                    continue
-                sub_df = db_df[db_df["レース名"].astype(str).str.strip() == r_str]
-                # 確定着順が入っていないレースを対象とする
-                has_rank = sub_df["確定着順"].astype(str).str.strip().replace("nan", "").replace("None", "").any()
-                if not has_rank:
-                    unrecap_races.append(r_str)
+        # 確定着順・回顧メモが未入力の「評価出し済み・未回顧レース」のみを厳格抽出
+        unrecap_races = []
+        for r in db_df["レース名"].dropna().unique():
+            r_str = str(r).strip()
+            if not r_str:
+                continue
+            sub_df = db_df[db_df["レース名"].astype(str).str.strip() == r_str]
             
-            # 未回顧のレースがあればそれを優先表示、無ければ全レース表示
-            races_in_db = unrecap_races if unrecap_races else [str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip()]
-        else:
-            races_in_db = [str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip()]
+            has_rank = False
+            if "確定着順" in sub_df.columns:
+                has_rank = sub_df["確定着順"].astype(str).str.strip().replace(["nan", "None", "NaN"], "").any()
+            
+            has_memo = False
+            if "回顧メモ" in sub_df.columns:
+                has_memo = sub_df["回顧メモ"].astype(str).str.strip().replace(["nan", "None", "NaN"], "").any()
 
-        if not races_in_db:
-            st.warning("⚠️ 回顧対象となる予想済みレースがありません。「📋 レース分析・予想」で解析を実行してください。")
+            if not (has_rank or has_memo):
+                unrecap_races.append(r_str)
+
+        if not unrecap_races:
+            st.success("🎉 現在、未回顧の予想レースはありません（すべての予想レースの回顧・照合が完了しています）！")
+            st.info("💡 過去の回顧結果を閲覧する場合は「📝 回顧・精度検証一覧（プール）」メニューをご確認ください。")
         else:
-            # 直前に解析したレースがあれば自動で初期選択
             default_idx = 0
             if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
                 latest_race = str(st.session_state["analyzed_df"]["レース名"].iloc[0]).strip()
-                if latest_race in races_in_db:
-                    default_idx = races_in_db.index(latest_race)
+                if latest_race in unrecap_races:
+                    default_idx = unrecap_races.index(latest_race)
 
             selected_race = st.selectbox(
-                "🎯 回顧対象のレースを選択してください（※予想完了・未回顧のレースのみ表示）",
-                races_in_db,
+                "🎯 回顧対象のレースを選択してください（※未回顧のレースのみ表示）",
+                unrecap_races,
                 index=default_idx
             )
 
