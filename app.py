@@ -1873,10 +1873,11 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         details = res_data.get("races_detail", [])
         if details:
             tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
-            tabs = st.tabs(tab_titles)
+            tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
+        tabs = st.tabs(tab_titles)
 
-            for idx, tab in enumerate(tabs):
-                with tab:
+        for idx, tab in enumerate(tabs):
+            with tab:
                     r_detail = details[idx]
                     h_list = r_detail.get("horses", [])
                     if h_list:
@@ -1995,7 +1996,7 @@ def render_umael_chat_ui(df, race_title):
 # 📊 レース評価・表示メインコンポーネント
 # --------------------------------------------------
 
-def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
+def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_mode_override=None):
     if df is None or df.empty:
         st.warning("⚠️ 表示できる解析データがありません。再度分析を実行してください。")
         return
@@ -2185,7 +2186,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
                                     <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
-                                    <b style="font-size:1.3rem; color:#fff;">{h_pop} 人気</b>
+                                    <b style="font-size:1.3rem; color:#f39c12 !important; font-weight:bold;">{h_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
                                     <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
@@ -2210,7 +2211,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                             <div style="display:flex; justify-content:space-around; margin-top:10px;">
                                 <div style="flex:1; text-align:center;">
                                     <span style="color:#aaa; font-size:0.85rem;">想定人気</span><br>
-                                    <b style="font-size:1.3rem; color:#fff;">{a_pop} 人気</b>
+                                    <b style="font-size:1.3rem; color:#ff4d4d !important; font-weight:bold;">{a_pop} 人気</b>
                                 </div>
                                 <div style="flex:1; text-align:center;">
                                     <span style="color:#aaa; font-size:0.85rem;">指数合計値</span><br>
@@ -2310,18 +2311,47 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
                     unsafe_allow_html=True,
                 )
 
-    view_tab1, view_tab2 = st.tabs(
-        ["🌟 推奨評価上位サマリー", "📊 詳細全データ表（評価順）"]
-    )
+    summary_choice = "🌟 推奨評価上位サマリー"
+    detail_choice = "📊 詳細全データ表（評価順）"
 
-    with view_tab1:
-        render_summary_body()
+    if view_mode_override is not None:
+        # 共有URL側では、画面先頭で描画したラジオの選択結果を受け取る。
+        # 関数内で二重にラジオを描画しない。
+        view_mode = view_mode_override
+    elif is_viewer_mode:
+        # 互換用：他の呼び出し元から共有モードを直接呼ばれた場合も切替可能にする。
+        race_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(race_title)).strip("_")[:80] or "race"
+        view_state_key = f"shared_view_mode_{race_key}"
 
-    with view_tab2:
-        st.subheader(f"📊 {race_title} 詳細全データ表（評価順）")
-        st.info(
-            "💡 **※「メモ（詳細分析）」等の各セルは、枠内をダブルクリック（スマホはダブルタップ）すると全文を拡大表示・コピーできます！**"
+        if view_state_key not in st.session_state:
+            requested_view = str(st.query_params.get("view", "summary")).strip().lower()
+            st.session_state[view_state_key] = detail_choice if requested_view == "detail" else summary_choice
+
+        def _sync_shared_view_to_url():
+            selected_view = st.session_state.get(view_state_key, summary_choice)
+            st.query_params["view"] = "detail" if selected_view == detail_choice else "summary"
+
+        view_mode = st.radio(
+            "表示切替",
+            [summary_choice, detail_choice],
+            horizontal=True,
+            label_visibility="collapsed",
+            key=view_state_key,
+            on_change=_sync_shared_view_to_url,
         )
+    else:
+        view_mode = st.radio(
+            "表示切替",
+            [summary_choice, detail_choice],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="view_mode_select_main",
+        )
+
+    if view_mode == "🌟 推奨評価上位サマリー":
+        render_summary_body()
+    else:
+        st.subheader(f"📊 {race_title} 詳細全データ表（評価順）")
 
         col_config_detail = {
             "馬番": st.column_config.NumberColumn("馬番", width="small"),
@@ -2361,16 +2391,22 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True):
 
 
 # --------------------------------------------------
-# 🎨 デザインCSS定義（ダーク＆ライトテーマ完全対応・グリーン系統一）
+# 🎨 ウマエルプロ専用・完全ダークモード固定CSS
 # --------------------------------------------------
-
-st.markdown(
-    """
+st.markdown("""
 <style>
-    /* サイドバー非表示設定 */
-    [data-testid="stSidebar"] { display: none !important; }
-    div[data-testid="stSidebarCollapseButton"] { display: none !important; }
-    
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:ital,wght@1,800;1,900&family=Racing+Sans+One&display=swap');
+
+    /* 全体背景 ＆ テキスト色（ダークモード完全固定） */
+    [data-testid="stAppViewContainer"], .stApp, .main, section.main, div[data-testid="stMainBlockContainer"] {
+        width: 100% !important;
+        background-color: #080a0f !important;
+        color: #ffffff !important;
+        --umael-bg-color: #080a0f;
+        --umael-text-color: #ffffff;
+    }
+
+    /* 全体コンテナの上部余白（見切れ防止） */
     .main .block-container,
     div[data-testid="stMainBlockContainer"],
     div[data-testid="stAppViewBlockContainer"],
@@ -2379,108 +2415,174 @@ st.markdown(
         width: 98% !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
-        padding-top: 1rem !important;
+        padding-top: 3.5rem !important;
     }
 
-    /* アクションボタン グリーン系統一 */
+    /* 基本テキスト・見出し・ラベルの白文字（textareaなどの入力欄を除外） */
+    .stApp label, .stApp p:not(textarea *), .stApp li, .stApp small, .stApp legend,
+    .stApp [data-testid="stWidgetLabel"], .stApp [data-testid="stWidgetLabel"] p,
+    .stApp .stMarkdown p, .stApp .stCaption p,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    [data-testid="stNotification"] p {
+        color: #ffffff !important;
+    }
+    h1, h2, h3 { color: #f39c12 !important; font-weight: bold; }
+
+    /* 📝 ルールテキストエリア（白背景 × 濃い黒文字 強制固定） */
+    html body .stApp textarea,
+    html body div[data-testid="stTextArea"] textarea,
+    html body textarea {
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        font-weight: 600 !important;
+        border: 2px solid #CBD5E0 !important;
+        border-radius: 6px !important;
+    }
+
+    /* ヘッダー文字・キャプション */
+    .umael-title {
+        font-family: 'Racing Sans One', 'Orbitron', 'Trebuchet MS', sans-serif !important;
+        font-style: italic !important;
+        font-weight: 900 !important;
+        font-size: 3.0rem !important;
+        letter-spacing: 1.5px !important;
+        color: #ffffff !important;
+        line-height: 1.0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .umael-caption {
+        color: #cccccc !important;
+        font-size: 0.88rem !important;
+        margin-top: 6px !important;
+    }
+
+    /* 右上「設定」ボタン */
+    div[data-testid="stPopover"] button,
+    div[data-testid="stPopover"] > button {
+        background-color: #1C6037 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #237845 !important;
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        margin-top: 25px !important;
+    }
+    div[data-testid="stPopover"] button * {
+        color: #FFFFFF !important;
+        fill: #FFFFFF !important;
+    }
+
+    /* 設定ポップオーバー内部 */
+    div[data-testid="stPopoverBody"],
+    div[data-testid="stPopoverContent"] {
+        background-color: #1A202C !important;
+        color: #FFFFFF !important;
+        border: 1px solid #2D3748 !important;
+        border-radius: 10px !important;
+    }
+    div[data-testid="stPopoverBody"] label,
+    div[data-testid="stPopoverBody"] p,
+    div[data-testid="stPopoverContent"] label,
+    div[data-testid="stPopoverContent"] p {
+        color: #FFFFFF !important;
+    }
+
+    /* 設定入力欄（input）の背景を白固定・文字色濃いグレー */
+    div[data-testid="stPopoverBody"] input,
+    div[data-testid="stPopoverContent"] input {
+        background-color: #FFFFFF !important;
+        color: #1A202C !important;
+        -webkit-text-fill-color: #1A202C !important;
+        font-weight: 600 !important;
+        border: 1px solid #CBD5E0 !important;
+        border-radius: 6px !important;
+    }
+
+    /* ファイルアップロードボタン ＆ 各種ボタンを緑に統一 */
+    [data-testid="stFileUploader"] button,
     div.stButton > button,
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-primary"] {
+    div.stDownloadButton > button {
         background-color: #10b981 !important;
         background: #10b981 !important;
         color: #ffffff !important;
         border: 1px solid #059669 !important;
         font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(16, 185, 129, 0.3) !important;
-        border-radius: 6px !important;
-    }
-    div.stButton > button:hover,
-    button[data-testid="stBaseButton-secondary"]:hover,
-    button[data-testid="stBaseButton-primary"]:hover {
-        background-color: #059669 !important;
-        background: #059669 !important;
-        border-color: #047857 !important;
-        box-shadow: 0 0 12px rgba(16, 185, 129, 0.6) !important;
+        box-shadow: 0 2px 5px rgba(16, 185, 129, 0.4) !important;
     }
 
-    /* カード＆テキストボックスのデザイン（テーマ適応） */
+    /* ピル型ラジオボタン */
+    div[data-testid="stRadio"] > div { flex-direction: row !important; flex-wrap: wrap !important; gap: 8px !important; }
+    div[data-testid="stRadio"] label {
+        background-color: #1e2638 !important;
+        border: 1px solid #334155 !important;
+        border-radius: 20px !important;
+        padding: 6px 16px !important;
+        color: #ffffff !important;
+    }
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stRadio"] label span {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+        font-weight: bold !important;
+    }
+    div[data-testid="stRadio"] label[data-checked="true"] {
+        background-color: #1C6037 !important;
+        border-color: #237845 !important;
+        box-shadow: 0 0 10px rgba(28, 96, 55, 0.6) !important;
+    }
+    div[data-testid="stRadio"] label[data-checked="true"] p {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+    }
+
+    /* プログレスバー ＆ データフレーム */
+    div[data-testid="stDataFrame"] { color: #ffffff !important; }
+    div[data-testid="stDataFrame"] div[role="progressbar"] {
+        height: 14px !important;
+        border-radius: 4px !important;
+        background-color: #1e2638 !important;
+    }
+    div[data-testid="stDataFrame"] div[role="progressbar"] > div {
+        background: #0bce0e !important;
+        border-radius: 4px !important;
+    }
+
+    /* カードデザイン */
     .risk-card {
-        background: rgba(16, 185, 129, 0.08);
-        border: 2px solid #10b981;
-        border-radius: 10px;
-        padding: 18px;
-        text-align: center;
-        margin-bottom: 15px;
-        box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+        border: 2px solid #00f0ff; border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 15px; box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
     }
     .honmei-card {
-        background: rgba(245, 158, 11, 0.08);
-        border: 2px solid #f59e0b;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
-        box-shadow: 0 0 15px rgba(245, 158, 11, 0.25);
+        background: linear-gradient(135deg, #2b1e00 0%, #4a3500 100%);
+        border: 2px solid #f39c12; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 0 15px rgba(243, 156, 18, 0.4);
     }
     .anaba-card {
-        background: rgba(239, 68, 68, 0.08);
-        border: 2px solid #ef4444;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
-        box-shadow: 0 0 15px rgba(239, 68, 68, 0.25);
+        background: linear-gradient(135deg, #3a0007 0%, #5c000b 100%);
+        border: 2px solid #e74c3c; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 0 15px rgba(231, 76, 60, 0.4);
     }
     .kaime-card-item {
-        background: rgba(16, 185, 129, 0.05);
-        border: 2px solid #10b981;
-        border-left: 6px solid #10b981;
-        border-radius: 8px;
-        padding: 12px 18px;
-        margin-bottom: 12px;
-        font-size: 1.15rem;
-        box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
-    }
-    .tenkai-box {
-        background-color: rgba(15, 23, 42, 0.85);
-        border: 2px solid #3b82f6;
-        border-radius: 10px;
-        padding: 18px;
-        margin-bottom: 25px;
-        white-space: pre-wrap;
-        line-height: 1.7;
-        color: #f8fafc;
-        font-size: 1.0rem;
-        box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+        background: #111622; border: 2px solid #ffd700; border-left: 6px solid #ffd700; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; font-size: 1.15rem; color: #ffffff; box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
     }
     .recap-box {
-        background-color: rgba(16, 185, 129, 0.05);
-        border: 2px solid #10b981;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 25px;
-        white-space: pre-wrap;
-        line-height: 1.8;
-        font-size: 1.0rem;
-        box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        background-color: #0d1117; border: 2px solid #10b981; border-radius: 10px; padding: 20px; margin-bottom: 25px; white-space: pre-wrap; line-height: 1.8; color: #e6edf3; font-size: 1.0rem; box-shadow: 0 0 15px rgba(16, 185, 129, 0.25);
     }
-    .card-title { font-size: 1.05rem; font-weight: bold; }
-    .card-horse-name { 
-        font-size: 1.4rem !important; 
-        font-weight: bold; 
-        margin: 6px 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .card-val-gold { font-size: 2.0rem; font-weight: bold; color: #f59e0b; }
-    .card-val-red { font-size: 2.0rem; font-weight: bold; color: #ef4444; }
+    .card-title { font-size: 1.05rem; font-weight: bold; color: #ffffff; }
+    .honmei-card .card-title,
+    .honmei-card .card-horse-name,
+    .honmei-card .card-val-gold { color: #f39c12 !important; -webkit-text-fill-color: #f39c12 !important; }
+    .anaba-card .card-title,
+    .anaba-card .card-horse-name,
+    .anaba-card .card-val-red { color: #ff4d4d !important; -webkit-text-fill-color: #ff4d4d !important; }
+    .card-horse-name { font-size: 1.4rem !important; font-weight: bold; color: #ffffff; margin: 6px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-val-gold { font-size: 2.0rem; font-weight: bold; color: #f39c12; }
+    .card-val-red { font-size: 2.0rem; font-weight: bold; color: #ff4d4d; }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 
 # --------------------------------------------------
-# 🧭 URLパラメーター共有ロジック
+# 🧭 URLパラメーター共有ロジック（CSSの後に読み込み＆赤線消去）
 # --------------------------------------------------
 
 query_params = st.query_params
@@ -2488,11 +2590,51 @@ mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
 if mode_param == "share" and race_param:
+    # 共有画面専用のUIクリーンアップ
+    st.markdown("""
+    <style>
+        [data-testid="stSidebar"] { display: none !important; }
+        div[data-testid="stSidebarCollapseButton"] { display: none !important; }
+        header[data-testid="stHeader"] { display: none !important; }
+        div[data-testid="stDecoration"] { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
     db_df = load_db(selected_year="全期間")
     if not db_df.empty and "レース名" in db_df.columns:
         matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
         if not matched_df.empty:
-            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=False)
+            share_race_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(race_param)).strip("_")[:80] or "race"
+            share_view_key = f"shared_view_mode_{share_race_key}"
+            share_summary_choice = "🌟 推奨評価上位サマリー"
+            share_detail_choice = "📊 詳細全データ表（評価順）"
+
+            if share_view_key not in st.session_state:
+                requested_view = str(st.query_params.get("view", "summary")).strip().lower()
+                st.session_state[share_view_key] = (
+                    share_detail_choice if requested_view == "detail" else share_summary_choice
+                )
+
+            def _update_share_view_query():
+                current_view = st.session_state.get(share_view_key, share_summary_choice)
+                st.query_params["view"] = "detail" if current_view == share_detail_choice else "summary"
+
+            st.markdown("#### 📊 表示内容を切り替え")
+            share_view_mode = st.radio(
+                "表示切替",
+                [share_summary_choice, share_detail_choice],
+                horizontal=True,
+                key=share_view_key,
+                on_change=_update_share_view_query,
+                label_visibility="collapsed",
+            )
+            st.divider()
+            render_race_evaluation_view(
+                matched_df,
+                is_viewer_mode=True,
+                show_chat=False,
+                view_mode_override=share_view_mode,
+            )
         else:
             st.error(f"⚠️ レース「{race_param}」の解析データは見つかりませんでした。")
     else:
@@ -2500,264 +2642,10 @@ if mode_param == "share" and race_param:
 
     st.stop()
 
-elif "race" in query_params and not mode_param:
-    target_race_param = query_params["race"]
-    db_df = load_db(selected_year="全期間")
-
-    if not db_df.empty and "レース名" in db_df.columns:
-        matched_df = db_df[db_df["レース名"].astype(str) == str(target_race_param)]
-        if not matched_df.empty:
-            render_race_evaluation_view(matched_df, is_viewer_mode=True, show_chat=False)
-        else:
-            st.error(f"⚠️ レース「{target_race_param}」の解析データは見つかりませんでした。")
-    else:
-        st.error("⚠️ データベースに予想データが登録されていません。")
-
-    st.stop()
-
 
 # --------------------------------------------------
-# 🎨 テーマ ＆ カラー切り替え CSS動的インジェクション
+# 🏇 ヘッダー ＆ ロゴ横並び ＆ 設定ポップオーバー
 # --------------------------------------------------
-if "theme_mode" not in st.session_state:
-    st.session_state["theme_mode"] = "🌙 ダークモード（グリーンアクセント）"
-
-def apply_theme_css(theme):
-    if theme == "☀️ ライトモード（グリーンアクセント）":
-        bg_color, text_color, sub_text = "#F8FAFC", "#0F172A", "#475569"
-        radio_bg, radio_border, radio_text = "#EDF2F7", "#CBD5E1", "#1E293B"
-        alert_bg, alert_text = "#E6F4EA", "#154420"
-        pop_bg, pop_text = "#FFFFFF", "#0F172A"
-        help_icon_color = "#1E293B"  # 💡 ライトモード：黒・濃紺
-    elif theme == "💻 システム設定に合わせる":
-        st.markdown("""
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Orbitron:ital,wght@1,800;1,900&family=Racing+Sans+One&display=swap');
-            @media (prefers-color-scheme: dark) {
-                .stApp { background-color: #0E1117 !important; color: #FFFFFF !important; }
-                .stApp label, .stApp p, .stApp h1, .stApp h2, .stApp h3 { color: #FFFFFF !important; }
-            }
-            @media (prefers-color-scheme: light) {
-                .stApp { background-color: #F8FAFC !important; color: #0F172A !important; }
-                .stApp label, .stApp p, .stApp h1, .stApp h2, .stApp h3 { color: #0F172A !important; }
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        return
-    else:  # 🌙 ダークモード（既定）
-        bg_color, text_color, sub_text = "#0E1117", "#FFFFFF", "#CBD5E0"
-        radio_bg, radio_border, radio_text = "#2D3748", "#4A5568", "#E2E8F0"
-        alert_bg, alert_text = "#154420", "#FFFFFF"
-        pop_bg, pop_text = "#1A202C", "#FFFFFF"
-        help_icon_color = "#FFFFFF"  # 💡 ダークモード：純白
-
-    st.markdown(f"""
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:ital,wght@1,800;1,900&family=Racing+Sans+One&display=swap');
-
-        /* 全体背景 ＆ テキスト色（テーマ動的連動） */
-        .stApp {{ background-color: {bg_color} !important; color: {text_color} !important; }}
-
-        /* ヘッダー全体（ロゴ＋見出し）の位置調整 */
-        .umael-header-wrapper {{
-            display: flex !important;
-            align-items: center !important;
-            gap: 14px !important;
-            margin-top: 16px !important;
-            margin-bottom: 8px !important;
-        }}
-
-        .umael-header-logo {{
-            width: 80px !important;
-            height: auto !important;
-            border-radius: 8px !important;
-            flex-shrink: 0 !important;
-        }}
-
-        /* 疾走感のあるタイトル */
-        .umael-title {{
-            font-family: 'Racing Sans One', 'Orbitron', 'Trebuchet MS', sans-serif !important;
-            font-style: italic !important;
-            font-weight: 900 !important;
-            font-size: 3.0rem !important;
-            letter-spacing: 1.5px !important;
-            color: {text_color} !important;
-            line-height: 1.0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-        }}
-        .umael-caption {{
-            color: {sub_text} !important;
-            font-size: 0.88rem !important;
-            margin-top: 6px !important;
-        }}
-
-        /* 全般のテキスト色・ラベル色（テーマ連動） */
-        .stApp label,
-        .stApp label p,
-        .stApp [data-testid="stWidgetLabel"] p,
-        .stApp .stMarkdown p,
-        .stApp .stCaption p,
-        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
-        [data-testid="stNotification"] p {{
-            color: {text_color} !important;
-        }}
-
-        /* 右上「設定」ボタン */
-        div[data-testid="stPopover"] button,
-        div[data-testid="stPopover"] > button {{
-            background-color: #1C6037 !important;
-            color: #FFFFFF !important;
-            border: 1px solid #237845 !important;
-            border-radius: 8px !important;
-            font-weight: bold !important;
-            margin-top: 16px !important;
-        }}
-        div[data-testid="stPopover"] button * {{
-            color: #FFFFFF !important;
-            fill: #FFFFFF !important;
-        }}
-
-        /* 設定ポップオーバー内部の背景・文字色 */
-        div[data-testid="stPopoverBody"],
-        div[data-testid="stPopoverContent"] {{
-            background-color: {pop_bg} !important;
-            color: {pop_text} !important;
-            border: 1px solid #2D3748 !important;
-            border-radius: 10px !important;
-        }}
-        div[data-testid="stPopoverBody"] label,
-        div[data-testid="stPopoverBody"] p,
-        div[data-testid="stPopoverBody"] h1,
-        div[data-testid="stPopoverBody"] h2,
-        div[data-testid="stPopoverBody"] h3,
-        div[data-testid="stPopoverContent"] label,
-        div[data-testid="stPopoverContent"] p,
-        div[data-testid="stPopoverContent"] h1,
-        div[data-testid="stPopoverContent"] h2,
-        div[data-testid="stPopoverContent"] h3 {{
-            color: {pop_text} !important;
-        }}
-
-        /* ❓ ヘルプアイコン（？マーク）：Light＝黒・濃紺 / Dark＝純白（内部穴を潰さない制御） */
-        div[data-testid="stTooltipIcon"],
-        div[data-testid="stTooltipHoverTarget"],
-        div[data-testid="stTooltipIcon"] svg,
-        div[data-testid="stTooltipHoverTarget"] svg {{
-            color: {help_icon_color} !important;
-            opacity: 1 !important;
-        }}
-
-        /* 📦 入力ボックス（input）の背景を常に【白】に固定し、文字色を【濃いグレー】化 */
-        div[data-testid="stPopoverBody"] input,
-        div[data-testid="stPopoverContent"] input {{
-            background-color: #FFFFFF !important;
-            color: #1A202C !important;
-            -webkit-text-fill-color: #1A202C !important;
-            font-weight: 600 !important;
-            border: 1px solid #CBD5E0 !important;
-            border-radius: 6px !important;
-        }}
-
-        /* 👁️ 入力欄内部の「目のアイコン」を常に白背景用の黒系で固定 */
-        div[data-testid="stTextInput"] div[data-baseweb="input"] button,
-        div[data-testid="stTextInput"] div[data-baseweb="input"] button svg,
-        div[data-testid="stTextInput"] div[data-baseweb="input"] button svg * {{
-            color: #1A202C !important;
-            fill: #1A202C !important;
-            stroke: #1A202C !important;
-        }}
-
-        /* 厄介なパスワード・エイリアス保存ポップオーバーの強制非表示化 */
-        div[role="dialog"]:has(span:contains("パスワード")),
-        div[role="dialog"]:has(span:contains("メール")),
-        div[role="dialog"]:has(div:contains("管理")),
-        div[class*="autofill"],
-        div[class*="credentials"] {{
-            display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-        }}
-
-        /* アップロード枠内の注記テキスト */
-        [data-testid="stFileUploadDropzoneInstructions"] small,
-        div[data-testid="stFileUploaderDropzoneInstructions"] small,
-        [data-testid="stFileUploadDropzone"] small {{
-            display: block !important;
-            color: #334155 !important;
-            font-weight: 600 !important;
-        }}
-
-        /* タブ・ナビゲーション・ラジオボタン（テーマ連動） */
-        button[data-baseweb="tab"] {{
-            color: {text_color} !important;
-            background-color: {radio_bg} !important;
-            border-radius: 6px 6px 0 0 !important;
-            margin-right: 4px !important;
-        }}
-        button[data-baseweb="tab"][aria-selected="true"] {{
-            color: #FFFFFF !important;
-            background-color: #1C6037 !important;
-            font-weight: bold !important;
-        }}
-
-        div[data-testid="stRadio"] > div {{ flex-direction: row !important; flex-wrap: wrap !important; gap: 8px !important; }}
-        div[data-testid="stRadio"] label {{
-            background-color: {radio_bg} !important;
-            border: 1px solid {radio_border} !important;
-            border-radius: 20px !important;
-            padding: 6px 16px !important;
-            color: {radio_text} !important;
-        }}
-        div[data-testid="stRadio"] label p {{
-            color: {radio_text} !important;
-        }}
-        div[data-testid="stRadio"] label[data-checked="true"] {{
-            background-color: #1C6037 !important;
-            border-color: #237845 !important;
-            color: #FFFFFF !important;
-            font-weight: bold !important;
-        }}
-        div[data-testid="stRadio"] label[data-checked="true"] p {{
-            color: #FFFFFF !important;
-        }}
-
-        /* ルールテキストエリア（白背景・黒文字） */
-        textarea {{
-            background-color: #FFFFFF !important;
-            color: #000000 !important;
-            border: 1px solid #CBD5E0 !important;
-            border-radius: 6px !important;
-        }}
-
-        /* ボタン全般（フォレストグリーン固定） */
-        div.stButton > button,
-        div.stDownloadButton > button {{
-            background-color: #1C6037 !important;
-            color: #FFFFFF !important;
-            border: 1px solid #237845 !important;
-            border-radius: 8px !important;
-            font-weight: 600 !important;
-        }}
-        div.stButton > button p,
-        div.stDownloadButton > button p {{
-            color: #FFFFFF !important;
-        }}
-
-        /* バナー表示 */
-        .stAlert {{
-            background-color: {alert_bg} !important;
-            color: {alert_text} !important;
-            border: 1px solid #1C6037 !important;
-            border-radius: 8px !important;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
-
-apply_theme_css(st.session_state["theme_mode"])
-
-# 🖼 ロゴ画像の自動検出とbase64変換
 import base64
 
 logo_path = None
@@ -2771,60 +2659,38 @@ if logo_path:
     with open(logo_path, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-# 🏇 ヘッダー ＆ 設定（⚙️）ポップオーバー
 head_col1, head_col2 = st.columns([4.2, 1])
 
 with head_col1:
     if logo_b64:
-        st.markdown(f'''
-            <div class="umael-header-wrapper">
-                <img src="data:image/png;base64,{logo_b64}" class="umael-header-logo" />
-                <div class="umael-title-container">
-                    <div class="umael-title">Umael-Pro</div>
-                    <div class="umael-caption">馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選</div>
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: center; gap: 16px; margin-top: 20px; margin-bottom: 10px;">
+                <img src="data:image/png;base64,{logo_b64}" style="width: 75px; height: 75px; border-radius: 12px; flex-shrink: 0; object-fit: cover;" />
+                <div>
+                    <div class="umael-title" style="margin: 0; padding: 0; line-height: 1.0;">Umael-Pro</div>
+                    <div class="umael-caption" style="margin-top: 6px;">馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選</div>
                 </div>
             </div>
-        ''', unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown('''
-            <div class="umael-header-wrapper">
-                <div class="umael-title-container">
-                    <div class="umael-title">Umael-Pro</div>
-                    <div class="umael-caption">馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選</div>
-                </div>
+        st.markdown(
+            """
+            <div style="margin-top: 20px; margin-bottom: 10px;">
+                <div class="umael-title" style="margin: 0; padding: 0; line-height: 1.0;">Umael-Pro</div>
+                <div class="umael-caption" style="margin-top: 6px;">馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選</div>
             </div>
-        ''', unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
 with head_col2:
     st.write("")
     with st.popover("⚙️ 設定 (☰)", use_container_width=True):
         st.markdown("### ⚙️ システム設定")
-        st.caption("📌 **システムバージョン: Ver 3.1**")
-        st.markdown("---")
-
-        st.subheader("🎨 表示テーマ設定")
-        
-        theme_options = [
-            "🌙 ダークモード（グリーンアクセント）", 
-            "☀️ ライトモード（グリーンアクセント）", 
-            "💻 システム設定に合わせる"
-        ]
-        
-        current_theme = st.session_state.get("theme_mode", theme_options[0])
-        if current_theme not in theme_options:
-            current_theme = theme_options[0]
-            
-        theme_choice = st.radio(
-            "カラーモード切替",
-            theme_options,
-            index=theme_options.index(current_theme),
-            key="theme_selector_unique"
-        )
-        
-        if theme_choice != st.session_state["theme_mode"]:
-            st.session_state["theme_mode"] = theme_choice
-            st.rerun()
-
+        st.caption("📌 **システムバージョン: Ver 3.1（完全ダークモード仕様）**")
         st.markdown("---")
 
         saved_key = load_api_key()
@@ -2833,7 +2699,7 @@ with head_col2:
             value=saved_key,
             type="password",
             key="gemini_api_key_input",
-            autocomplete="new-password"
+            autocomplete="new-password",
         )
 
         if api_key and api_key != saved_key:
@@ -2843,7 +2709,7 @@ with head_col2:
             "🤖 使用AIモデル",
             ["gemini-3.8-flash"],
             index=0,
-            key="selected_model_unique"
+            key="selected_model_unique",
         )
         st.caption("🔑 st.secrets / APIキー自動ロード動作中")
         st.caption("📱 スマホ表示最適化済み")
@@ -3321,10 +3187,6 @@ elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
     render_field_mode_ui(active_key, active_selected_rule, selected_model)
 
 
-# --------------------------------------------------
-# ⚙️ 3. ルール管理・アップデート メニュー
-# --------------------------------------------------
-
 elif selected_menu == "⚙️ ルール管理・アップデート":
     st.subheader("⚙️ 解析ルールの管理・アップデート")
     st.write(
@@ -3337,151 +3199,160 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         "🌾 北海道・洋芝専用ルールの設定",
     ])
 
+    # --------------------------------------------------
+    # 🏆 1. G1専用ルール
+    # --------------------------------------------------
     with sub_tab1:
         st.markdown("#### 🏆 G1専用ルールのアップロード ＆ 保存")
         current_g1_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-        
+
         col_g1_1, col_g1_2 = st.columns([2, 1])
 
         with col_g1_1:
             up_g1 = st.file_uploader(
-                "G1用ルールテキスト (.txt)", type=["txt"], key="up_g1_file_v2"
+                "📂 G1用ルールテキスト (.txt) を選択", type=["txt"], key="up_g1_file_v5"
             )
             if up_g1 is not None:
-                if st.button(
-                    "📥 アップロードしたテキストを画面に読み込む", key="btn_load_g1_v2"
-                ):
-                    loaded_text = up_g1.read().decode("utf-8", errors="ignore")
-                    save_rules_to_file(RULE_G1_FILE, loaded_text)
-                    st.session_state["g1_text_val"] = loaded_text
-                    st.success("📥 読み込みとファイル保存が完了しました！")
+                uploaded_g1_text = up_g1.read().decode("utf-8", errors="ignore")
+                if uploaded_g1_text.strip() and uploaded_g1_text != st.session_state.get("last_up_g1_text"):
+                    save_rules_to_file(RULE_G1_FILE, uploaded_g1_text)
+                    st.session_state["g1_rule_area_input"] = uploaded_g1_text
+                    st.session_state["last_up_g1_text"] = uploaded_g1_text
+                    st.toast("🎉 アップロードしたG1ルールを自動読み込み＆保存しました！")
                     st.rerun()
 
         with col_g1_2:
-            if st.button("🔄 G1初期ルールに戻す", key="btn_g1_def_v2"):
+            st.write("")
+            if st.button("🔄 G1初期ルールに戻す", key="btn_g1_def_v5", use_container_width=True):
                 save_rules_to_file(RULE_G1_FILE, DEFAULT_G1_RULES)
-                st.session_state["g1_text_val"] = DEFAULT_G1_RULES
+                st.session_state["g1_rule_area_input"] = DEFAULT_G1_RULES
+                st.session_state.pop("last_up_g1_text", None)
+                st.toast("🔄 G1初期ルールにリセットしました！")
                 st.rerun()
 
-        g1_display_val = st.session_state.get("g1_text_val", current_g1_rule)
+        if "g1_rule_area_input" not in st.session_state:
+            st.session_state["g1_rule_area_input"] = current_g1_rule
+
         g1_input_text = st.text_area(
             "G1専用ルールテキスト（直接編集可能）",
-            value=g1_display_val,
             height=300,
-            key="g1_text_area_input_v2"
+            key="g1_rule_area_input"
         )
 
         if st.button(
             "💾 G1専用ルールとして更新・保存する",
             use_container_width=True,
-            key="save_g1_btn_v2",
+            key="save_g1_btn_v5",
         ):
             if g1_input_text.strip():
                 save_rules_to_file(RULE_G1_FILE, g1_input_text)
-                st.session_state["g1_text_val"] = g1_input_text
-                st.success(
-                    "🎉 G1専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
-                )
+                st.toast("🎉 G1専用ルールを更新・保存しました！次回からも自動適用されます！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
+    # --------------------------------------------------
+    # 🏇 2. 平場・G2・G3専用ルール
+    # --------------------------------------------------
     with sub_tab2:
         st.markdown("#### 🏇 平場・G2・G3専用ルールのアップロード ＆ 保存")
         current_gen_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
-        
+
         col_gen_1, col_gen_2 = st.columns([2, 1])
 
         with col_gen_1:
             up_gen = st.file_uploader(
-                "平場・G2・G3用ルールテキスト (.txt)",
+                "📂 平場・G2・G3用ルールテキスト (.txt) を選択",
                 type=["txt"],
-                key="up_gen_file_v2",
+                key="up_gen_file_v5",
             )
             if up_gen is not None:
-                if st.button(
-                    "📥 アップロードしたテキストを画面に読み込む", key="btn_load_gen_v2"
-                ):
-                    loaded_text = up_gen.read().decode("utf-8", errors="ignore")
-                    save_rules_to_file(RULE_GENERAL_FILE, loaded_text)
-                    st.session_state["gen_text_val"] = loaded_text
-                    st.success("📥 読み込みとファイル保存が完了しました！")
+                uploaded_gen_text = up_gen.read().decode("utf-8", errors="ignore")
+                if uploaded_gen_text.strip() and uploaded_gen_text != st.session_state.get("last_up_gen_text"):
+                    save_rules_to_file(RULE_GENERAL_FILE, uploaded_gen_text)
+                    st.session_state["gen_rule_area_input"] = uploaded_gen_text
+                    st.session_state["last_up_gen_text"] = uploaded_gen_text
+                    st.toast("🎉 アップロードした平場・G2・G3ルールを自動読み込み＆保存しました！")
                     st.rerun()
 
         with col_gen_2:
-            if st.button("🔄 平場・G2・G3初期ルールに戻す", key="btn_gen_def_v2"):
+            st.write("")
+            if st.button("🔄 平場・G2・G3初期ルールに戻す", key="btn_gen_def_v5", use_container_width=True):
                 save_rules_to_file(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
-                st.session_state["gen_text_val"] = DEFAULT_GENERAL_RULES
+                st.session_state["gen_rule_area_input"] = DEFAULT_GENERAL_RULES
+                st.session_state.pop("last_up_gen_text", None)
+                st.toast("🔄 平場・G2・G3初期ルールにリセットしました！")
                 st.rerun()
 
-        gen_display_val = st.session_state.get("gen_text_val", current_gen_rule)
+        if "gen_rule_area_input" not in st.session_state:
+            st.session_state["gen_rule_area_input"] = current_gen_rule
+
         gen_input_text = st.text_area(
             "平場・G2・G3専用ルールテキスト（直接編集可能）",
-            value=gen_display_val,
             height=300,
-            key="gen_text_area_input_v2"
+            key="gen_rule_area_input"
         )
 
         if st.button(
             "💾 平場・G2・G3専用ルールとして更新・保存する",
             use_container_width=True,
-            key="save_gen_btn_v2",
+            key="save_gen_btn_v5",
         ):
             if gen_input_text.strip():
                 save_rules_to_file(RULE_GENERAL_FILE, gen_input_text)
-                st.session_state["gen_text_val"] = gen_input_text
-                st.success(
-                    "🎉 平場・G2・G3専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
-                )
+                st.toast("🎉 平場・G2・G3専用ルールを更新・保存しました！次回からも自動適用されます！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
+    # --------------------------------------------------
+    # 🌾 3. 北海道・洋芝専用ルール
+    # --------------------------------------------------
     with sub_tab3:
         st.markdown("#### 🌾 北海道・洋芝専用ルールのアップロード ＆ 保存")
         current_hok_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
-        
+
         col_hok_1, col_hok_2 = st.columns([2, 1])
 
         with col_hok_1:
             up_hok = st.file_uploader(
-                "北海道・洋芝用ルールテキスト (.txt)",
+                "📂 北海道・洋芝用ルールテキスト (.txt) を選択",
                 type=["txt"],
-                key="up_hok_file_v2",
+                key="up_hok_file_v5",
             )
             if up_hok is not None:
-                if st.button(
-                    "📥 アップロードしたテキストを画面に読み込む", key="btn_load_hok_v2"
-                ):
-                    loaded_text = up_hok.read().decode("utf-8", errors="ignore")
-                    save_rules_to_file(RULE_HOKKAIDO_FILE, loaded_text)
-                    st.session_state["hok_text_val"] = loaded_text
-                    st.success("📥 読み込みとファイル保存が完了しました！")
+                uploaded_hok_text = up_hok.read().decode("utf-8", errors="ignore")
+                if uploaded_hok_text.strip() and uploaded_hok_text != st.session_state.get("last_up_hok_text"):
+                    save_rules_to_file(RULE_HOKKAIDO_FILE, uploaded_hok_text)
+                    st.session_state["hok_rule_area_input"] = uploaded_hok_text
+                    st.session_state["last_up_hok_text"] = uploaded_hok_text
+                    st.toast("🎉 アップロードした北海道・洋芝ルールを自動読み込み＆保存しました！")
                     st.rerun()
 
         with col_hok_2:
-            if st.button("🔄 北海道・洋芝初期ルールに戻す", key="btn_hok_def_v2"):
+            st.write("")
+            if st.button("🔄 北海道・洋芝初期ルールに戻す", key="btn_hok_def_v5", use_container_width=True):
                 save_rules_to_file(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
-                st.session_state["hok_text_val"] = DEFAULT_HOKKAIDO_RULES
+                st.session_state["hok_rule_area_input"] = DEFAULT_HOKKAIDO_RULES
+                st.session_state.pop("last_up_hok_text", None)
+                st.toast("🔄 北海道・洋芝初期ルールにリセットしました！")
                 st.rerun()
 
-        hok_display_val = st.session_state.get("hok_text_val", current_hok_rule)
+        if "hok_rule_area_input" not in st.session_state:
+            st.session_state["hok_rule_area_input"] = current_hok_rule
+
         hok_input_text = st.text_area(
             "北海道・洋芝専用ルールテキスト（直接編集可能）",
-            value=hok_display_val,
             height=300,
-            key="hok_text_area_input_v2"
+            key="hok_rule_area_input"
         )
 
         if st.button(
             "💾 北海道・洋芝専用ルールとして更新・保存する",
             use_container_width=True,
-            key="save_hok_btn_v2",
+            key="save_hok_btn_v5",
         ):
             if hok_input_text.strip():
                 save_rules_to_file(RULE_HOKKAIDO_FILE, hok_input_text)
-                st.session_state["hok_text_val"] = hok_input_text
-                st.success(
-                    "🎉 北海道・洋芝専用ルールをファイルに更新・保存しました！次回からも自動適用されます！"
-                )
+                st.toast("🎉 北海道・洋芝専用ルールを更新・保存しました！次回からも自動適用されます！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
