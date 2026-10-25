@@ -2667,14 +2667,15 @@ if logo_path:
     with open(logo_path, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode("utf-8")
 
+# 🏇 ヘッダー ＆ ロゴ横並び ＆ 設定ポップオーバー
 head_col1, head_col2 = st.columns([4.2, 1])
 
 with head_col1:
     if logo_b64:
         st.markdown(
             f"""
-            <div style="display: flex; align-items: center; gap: 16px; margin-top: 20px; margin-bottom: 10px;">
-                <img src="data:image/png;base64,{logo_b64}" style="width: 75px; height: 75px; border-radius: 12px; flex-shrink: 0; object-fit: cover;" />
+            <div style="display: flex; align-items: center; gap: 20px; margin-top: 20px; margin-bottom: 10px;">
+                <img src="data:image/png;base64,{logo_b64}" style="width: 95px; height: 95px; border-radius: 16px; flex-shrink: 0; object-fit: contain; margin-right: 4px;" />
                 <div>
                     <div class="umael-title" style="margin: 0; padding: 0; line-height: 1.0;">Umael-Pro</div>
                     <div class="umael-caption" style="margin-top: 6px;">馬柱・血統・予想オッズ・競馬ブック・馬場情報 一括AI解析＆Webプール＆現地観戦厳選</div>
