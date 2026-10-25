@@ -698,7 +698,7 @@ def safe_int(val, default=0):
 
 
 # --------------------------------------------------
-# 🧼 データベースクレンジング ＆ マルチフォルダ同期ロジック
+# 🧼 データベースクレンジング ＆ 単一軸（1頭固定）強制判定ロジック
 # --------------------------------------------------
 
 def sanitize_dataframe_columns(df):
@@ -747,14 +747,6 @@ def sanitize_dataframe_columns(df):
             rename_map[orig_c] = "回顧メモ"
         elif c_clean in ["年度", "年"] and "年" not in rename_map.values():
             rename_map[orig_c] = "年"
-        elif c_clean in ["レース質展開予想", "展開シミュレーション", "レース質"] and "レース質展開予想" not in rename_map.values():
-            rename_map[orig_c] = "レース質展開予想"
-        elif c_clean in ["推奨買い目", "買い目", "買い目フォーメーション"] and "推奨買い目" not in rename_map.values():
-            rename_map[orig_c] = "推奨買い目"
-        elif c_clean in ["信頼度", "軸馬信頼度"] and "信頼度" not in rename_map.values():
-            rename_map[orig_c] = "信頼度"
-        elif c_clean in ["波乱度", "波乱度レベル"] and "波乱度" not in rename_map.values():
-            rename_map[orig_c] = "波乱度"
 
     if rename_map:
         df = df.rename(columns=rename_map)
@@ -780,6 +772,7 @@ def sanitize_dataframe_columns(df):
         if col not in df.columns:
             df[col] = ""
 
+    # 基本メモ・評価の生成処理
     def calc_eval_and_marks(row):
         score_val = row.get("総合スコア", 0)
         try:
@@ -803,36 +796,8 @@ def sanitize_dataframe_columns(df):
             else:
                 current_eval = "C"
 
-        jiku = str(row.get("軸", "")).strip()
-        himo = str(row.get("ヒモ", "")).strip()
-        chu = str(row.get("注", "")).strip()
-        kiri = str(row.get("切り", "")).strip()
-        memo_raw = str(row.get("メモ", "")).strip()
-
-        if not (jiku or himo or chu or kiri):
-            if "【推奨】" in memo_raw or "【軸】" in memo_raw:
-                jiku = "〇"
-            elif "【ヒモ】" in memo_raw:
-                himo = "〇"
-            elif "【注】" in memo_raw:
-                chu = "〇"
-            elif "【切り】" in memo_raw:
-                kiri = "〇"
-            else:
-                if current_eval in ["S"]:
-                    jiku = "〇"
-                elif current_eval in ["S+", "A+", "A", "B+"]:
-                    himo = "〇"
-                elif current_eval in ["B"]:
-                    chu = "〇"
-                else:
-                    kiri = "〇"
-
         row["評価"] = current_eval
-        row["軸"] = jiku
-        row["ヒモ"] = himo
-        row["注"] = chu
-        row["切り"] = kiri
+        memo_raw = str(row.get("メモ", "")).strip()
 
         if current_eval in ["S"]:
             label = "【推奨】"
@@ -864,6 +829,49 @@ def sanitize_dataframe_columns(df):
         return row
 
     df = df.apply(calc_eval_and_marks, axis=1)
+
+    # 🎯 軸（〇）は全頭中「スコア最上位の1頭（最高評価）」のみに厳格固定するクレンジング
+    if "レース名" in df.columns:
+        processed_groups = []
+        for r_name, group in df.groupby("レース名", sort=False):
+            # 総合スコア降順ソート
+            if "総合スコア" in group.columns:
+                group["_sort_num"] = pd.to_numeric(group["総合スコア"], errors="coerce").fillna(0)
+                group = group.sort_values(by="_sort_num", ascending=False).drop(columns=["_sort_num"])
+
+            has_assigned_jiku = False
+            g_rows = []
+            for idx, (_, row) in enumerate(group.iterrows()):
+                r_dict = row.to_dict()
+                c_eval = str(r_dict.get("評価", "")).strip().upper()
+
+                # スコア最上位（1頭目）かつ (S評価または最高点) の場合のみ「軸」を付与
+                if not has_assigned_jiku and idx == 0 and c_eval in ["S", "S+", "A+"]:
+                    r_dict["軸"] = "〇"
+                    r_dict["ヒモ"] = ""
+                    r_dict["注"] = ""
+                    r_dict["切り"] = ""
+                    has_assigned_jiku = True
+                else:
+                    # 2頭目以降は絶対に軸にさせず、評価に応じてヒモ・注・切りに振り分け
+                    r_dict["軸"] = ""
+                    if c_eval in ["S", "S+", "A+", "A", "B+"]:
+                        r_dict["ヒモ"] = "〇"
+                        r_dict["注"] = ""
+                        r_dict["切り"] = ""
+                    elif c_eval in ["B"]:
+                        r_dict["ヒモ"] = ""
+                        r_dict["注"] = "〇"
+                        r_dict["切り"] = ""
+                    else:
+                        r_dict["ヒモ"] = ""
+                        r_dict["注"] = ""
+                        r_dict["切り"] = "〇"
+                g_rows.append(r_dict)
+            processed_groups.append(pd.DataFrame(g_rows))
+
+        if processed_groups:
+            df = pd.concat(processed_groups, ignore_index=True)
 
     existing_years = df["年"].copy() if "年" in df.columns else pd.Series("", index=df.index)
     years = []
