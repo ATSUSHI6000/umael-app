@@ -3364,253 +3364,280 @@ elif selected_menu == "🔄 回顧・精度検証":
     if db_df.empty:
         st.info("💡 過去馬データベースに予想データがありません。「📋 レース分析・予想」で解析を実行してください！")
     else:
-        races_in_db = (
-            db_df["レース名"].unique().tolist() if "レース名" in db_df.columns else []
-        )
-        selected_race = st.selectbox(
-            "🎯 回顧対象のレースを選択してください", races_in_db
-        )
+        # 確定着順が未入力の「評価出し済み・未回顧レース」のみを自動抽出
+        if "確定着順" in db_df.columns:
+            unrecap_races = []
+            for r in db_df["レース名"].dropna().unique():
+                r_str = str(r).strip()
+                if not r_str:
+                    continue
+                sub_df = db_df[db_df["レース名"].astype(str).str.strip() == r_str]
+                # 確定着順が入っていないレースを対象とする
+                has_rank = sub_df["確定着順"].astype(str).str.strip().replace("nan", "").replace("None", "").any()
+                if not has_rank:
+                    unrecap_races.append(r_str)
+            
+            # 未回顧のレースがあればそれを優先表示、無ければ全レース表示
+            races_in_db = unrecap_races if unrecap_races else [str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip()]
+        else:
+            races_in_db = [str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip()]
 
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            res_text_input = st.text_area(
-                "1. 結果テキストのコピペ（netkeiba/JRA結果画面等）", height=180
+        if not races_in_db:
+            st.warning("⚠️ 回顧対象となる予想済みレースがありません。「📋 レース分析・予想」で解析を実行してください。")
+        else:
+            # 直前に解析したレースがあれば自動で初期選択
+            default_idx = 0
+            if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
+                latest_race = str(st.session_state["analyzed_df"]["レース名"].iloc[0]).strip()
+                if latest_race in races_in_db:
+                    default_idx = races_in_db.index(latest_race)
+
+            selected_race = st.selectbox(
+                "🎯 回顧対象のレースを選択してください（※予想完了・未回顧のレースのみ表示）",
+                races_in_db,
+                index=default_idx
             )
-        with col_r2:
-            res_file_inputs = st.file_uploader(
-                "2. 複数ソース結果ファイル (.txt / .csv / .pdf / .png / .jpg / .jpeg 一括選択可)",
-                type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key="recap_multi_file_uploader",
-            )
 
-        if st.button(
-            "🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True
-        ):
-            active_key = load_api_key()
-            if not active_key:
-                st.error("⚠️ Gemini API Key が設定されていません。右上「⚙️ 設定 (☰)」で入力してください！")
-            elif not res_text_input and not res_file_inputs:
-                st.warning("⚠️ 結果テキストのコピペまたはファイルを1つ以上読み込ませてください！")
-            else:
-                with st.spinner(
-                    "🏇 AIが全結果データを統合し、全着順を照合・深掘り長文回顧＆ルール検証中..."
-                ):
-                    try:
-                        raw_result = res_text_input if res_text_input else ""
-                        
-                        if res_file_inputs:
-                            for res_file in res_file_inputs:
-                                res_file.seek(0)
-                                if res_file.name.lower().endswith(".pdf"):
-                                    pdf_txt = extract_text_from_pdf(res_file, page_option="全ページ")
-                                    raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + pdf_txt
-                                elif res_file.name.lower().endswith((".txt", ".csv")):
-                                    txt_data = res_file.read().decode("utf-8", errors="ignore")
-                                    raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + txt_data
+            col_r1, col_r2 = st.columns(2)
+            with col_r1:
+                res_text_input = st.text_area(
+                    "1. 結果テキストのコピペ（netkeiba/JRA結果画面等）", height=180
+                )
+            with col_r2:
+                res_file_inputs = st.file_uploader(
+                    "2. 複数ソース結果ファイル (.txt / .csv / .pdf / .png / .jpg / .jpeg 一括選択可)",
+                    type=["txt", "csv", "pdf", "png", "jpg", "jpeg"],
+                    accept_multiple_files=True,
+                    key="recap_multi_file_uploader",
+                )
 
-                        target_df = db_df[
-                            db_df["レース名"].astype(str) == str(selected_race)
-                        ]
-                        cols = [
-                            c
-                            for c in [
-                                "馬番", "馬名", "総合スコア", "評価", "軸", "ヒモ", "注", "切り", "メモ",
-                            ]
-                            if c in target_df.columns
-                        ]
-                        predict_summary = target_df[cols].to_string(index=False)
-
-                        is_g1_race = "G1" in selected_race or "Ｇ１" in selected_race or "Jpn1" in selected_race or "Ｊｐｎ１" in selected_race
-                        is_hok_race = any(
-                            k in selected_race for k in ["函館", "札幌", "洋芝"]
-                        )
-
-                        if is_g1_race:
-                            current_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-                        elif is_hok_race:
-                            current_rule = load_saved_rules(
-                                RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
-                            )
-                        else:
-                            current_rule = load_saved_rules(
-                                RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
-                            )
-
-                        prompt = (
-                            "あなたは競馬予想プロフェッショナル「AI」です。\n"
-                            "以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ（複数ソース統合版）」を突き合わせ、全着順テーブル、プロ視点による詳細で長文の【本格レース回顧・見解レポート】、および【ルール改修案の自動判定】を行ってください。\n\n"
-                            f"【予想データ】\n{predict_summary}\n\n"
-                            f"【現在適用中の評価ルール】\n{current_rule}\n\n"
-                            f"【実際のレース結果データ（複数ソース統合版）】\n{raw_result}\n\n"
-                            "【出力フォーマット要求】\n"
-                            "1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
-                            "確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ\n\n"
-                            "※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。\n\n"
-                            "2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：\n\n"
-                            "   📌 1. 【レース全体の展開 ＆ 馬場・ペース振り返り】\n"
-                            "   ・スタートから道中のペース（ハイ・ミドル・スロー）とトラックバイアス（内外・前後有利）の分析\n"
-                            "   ・事前予想の展開シミュレーションとの合致点・乖離点の検証\n\n"
-                            "   🏆 2. 【上位入線馬（1〜3着馬）の勝因・勝負の分かれ目】\n"
-                            "   ・勝ち馬および好走馬の勝因（展開の助け、コース取り、馬場適性、騎手好判断など）の詳細見解\n\n"
-                            "   ⚠️ 3. 【人気裏切り馬・凡走馬の敗因分析】\n"
-                            "   ・1〜3番人気で敗れた馬や注目馬の敗因（出遅れ、展開不向き、馬場ノメり、距離限界、疲労、傷病等）を深掘り\n\n"
-                            "   🎯 4. 【次走巻き返し注目馬 ＆ 危険な人気馬メモ】\n"
-                            "   ・不利や展開不向きで崩れた「次走狙い目馬」\n"
-                            "   ・今回展開や恵まれた枠順で激走した「次走過剰人気注意馬」\n\n"
-                            "   📊 5. 【予想ロジック・指数との整合性検証】\n"
-                            "   ・指数・評価（S, A, B等）通りに好走した馬の検証、および評価から外れた波乱要素の要因特定\n\n"
-                            "3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、ルール改修案がある場合は必ず以下の【厳格な2ブロック構成】で出力してください：\n\n"
-                            "【★重要規則：バージョン繰り上げ指定】\n"
-                            "現在適用中のルールタイトルに記載されているバージョン（例: ver.8.3）を特定し、必ずバージョン番号を「+0.1」繰り上げたタイトル（例: ver.8.4）に改訂・ナンバリングしてください！\n\n"
-                            "[ブロック1：今回の補正・改修部分のみの枠]\n"
-                            "【今回追加・修正された改修案（補正内容）】\n"
-                            "（例：ver.8.3 → ver.8.4 への改修点、新設・変更された箇条書き条項のみを記述）\n\n"
-                            "---FULL_MERGED_RULE---\n\n"
-                            "[ブロック2：バージョン繰り上げ済みのルール全文枠]\n"
-                            "【◯◯専用・評価表出力ルール（ver.8.X・...）】\n"
-                            "（※ヘッダータイトルのバージョンをver.8.Xから更新後の新バージョンに変更し、本文内の更新日時も最新にし、補正・改修部分を正しい該当項目内に差し込み・完全統合した状態の『最新ルール全文』を出力してください。末尾への単純追記ではなく、ルール文章全体に適切に挿入・結合された完成版全文にすること）\n"
-                        )
-
-                        client = genai.Client(api_key=active_key)
-                        contents_list = [prompt]
-                        
-                        if res_file_inputs:
-                            for res_file in res_file_inputs:
-                                if res_file.name.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+            if st.button(
+                "🏁 回顧 ＆ 全着順照合 ＆ ルール検証を実行する", use_container_width=True
+            ):
+                active_key = load_api_key()
+                if not active_key:
+                    st.error("⚠️ Gemini API Key が設定されていません。右上「⚙️ 設定 (☰)」で入力してください！")
+                elif not res_text_input and not res_file_inputs:
+                    st.warning("⚠️ 結果テキストのコピペまたはファイルを1つ以上読み込ませてください！")
+                else:
+                    with st.spinner(
+                        "🏇 AIが全結果データを統合し、全着順を照合・深掘り長文回顧＆ルール検証中..."
+                    ):
+                        try:
+                            raw_result = res_text_input if res_text_input else ""
+                            
+                            if res_file_inputs:
+                                for res_file in res_file_inputs:
                                     res_file.seek(0)
-                                    mime_t = res_file.type
-                                    if not mime_t or mime_t == "application/octet-stream":
-                                        if res_file.name.lower().endswith(".pdf"):
-                                            mime_t = "application/pdf"
-                                        elif res_file.name.lower().endswith(".png"):
-                                            mime_t = "image/png"
-                                        elif res_file.name.lower().endswith((".jpg", ".jpeg")):
-                                            mime_t = "image/jpeg"
-                                    if mime_t:
-                                        contents_list.append(
-                                            types.Part.from_bytes(
-                                                data=res_file.read(), mime_type=mime_t
-                                            )
-                                        )
+                                    if res_file.name.lower().endswith(".pdf"):
+                                        pdf_txt = extract_text_from_pdf(res_file, page_option="全ページ")
+                                        raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + pdf_txt
+                                    elif res_file.name.lower().endswith((".txt", ".csv")):
+                                        txt_data = res_file.read().decode("utf-8", errors="ignore")
+                                        raw_result += f"\n=========================================\n【結果ファイル: {res_file.name}】\n=========================================\n" + txt_data
 
-                        response = client.models.generate_content(
-                            model=selected_model,
-                            contents=contents_list,
-                            config=types.GenerateContentConfig(
-                                temperature=0.0, seed=42
-                            ),
-                        )
-                        ai_res_out = response.text
+                            target_df = db_df[
+                                db_df["レース名"].astype(str) == str(selected_race)
+                            ]
+                            cols = [
+                                c
+                                for c in [
+                                    "馬番", "馬名", "総合スコア", "評価", "軸", "ヒモ", "注", "切り", "メモ",
+                                ]
+                                if c in target_df.columns
+                            ]
+                            predict_summary = target_df[cols].to_string(index=False)
 
-                        tbl_part = ai_res_out
-                        memo_part = "回顧コメントの抽出を完了しました。"
-                        rule_update_part = (
-                            "【ルール変更なし】現行ロジックのままで問題ありません。"
-                        )
+                            is_g1_race = "G1" in selected_race or "Ｇ１" in selected_race or "Jpn1" in selected_race or "Ｊｐｎ１" in selected_race
+                            is_hok_race = any(
+                                k in selected_race for k in ["函館", "札幌", "洋芝"]
+                            )
 
-                        if "---RESULT_MEMO---" in ai_res_out:
-                            tbl_part, rest_part = ai_res_out.split("---RESULT_MEMO---", 1)
-                            if "---RULE_UPDATE---" in rest_part:
-                                memo_part, rule_update_part = rest_part.split(
-                                    "---RULE_UPDATE---", 1
+                            if is_g1_race:
+                                current_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+                            elif is_hok_race:
+                                current_rule = load_saved_rules(
+                                    RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
                                 )
                             else:
-                                memo_part = rest_part
-                        elif "---RULE_UPDATE---" in ai_res_out:
-                            tbl_part, rule_update_part = ai_res_out.split(
-                                "---RULE_UPDATE---", 1
+                                current_rule = load_saved_rules(
+                                    RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
+                                )
+
+                            prompt = (
+                                "あなたは競馬予想プロフェッショナル「AI」です。\n"
+                                "以下の「予想データ」「現在適用中の評価ルール」「実際のレース結果データ（複数ソース統合版）」を突き合わせ、全着順テーブル、プロ視点による詳細で長文の【本格レース回顧・見解レポート】、および【ルール改修案の自動判定】を行ってください。\n\n"
+                                f"【予想データ】\n{predict_summary}\n\n"
+                                f"【現在適用中の評価ルール】\n{current_rule}\n\n"
+                                f"【実際のレース結果データ（複数ソース統合版）】\n{raw_result}\n\n"
+                                "【出力フォーマット要求】\n"
+                                "1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
+                                "確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ\n\n"
+                                "※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。\n\n"
+                                "2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：\n\n"
+                                "   📌 1. 【レース全体の展開 ＆ 馬場・ペース振り返り】\n"
+                                "   ・スタートから道中のペース（ハイ・ミドル・スロー）とトラックバイアス（内外・前後有利）の分析\n"
+                                "   ・事前予想の展開シミュレーションとの合致点・乖離点の検証\n\n"
+                                "   🏆 2. 【上位入線馬（1〜3着馬）の勝因・勝負の分かれ目】\n"
+                                "   ・勝ち馬および好走馬の勝因（展開の助け、コース取り、馬場適性、騎手好判断など）の詳細見解\n\n"
+                                "   ⚠️ 3. 【人気裏切り馬・凡走馬の敗因分析】\n"
+                                "   ・1〜3番人気で敗れた馬や注目馬の敗因（出遅れ、展開不向き、馬場ノメり、距離限界、疲労、傷病等）を深掘り\n\n"
+                                "   🎯 4. 【次走巻き返し注目馬 ＆ 危険な人気馬メモ】\n"
+                                "   ・不利や展開不向きで崩れた「次走狙い目馬」\n"
+                                "   ・今回展開や恵まれた枠順で激走した「次走過剰人気注意馬」\n\n"
+                                "   📊 5. 【予想ロジック・指数との整合性検証】\n"
+                                "   ・指数・評価（S, A, B等）通りに好走した馬の検証、および評価から外れた波乱要素の要因特定\n\n"
+                                "3. 回顧コメントの後に、改行して「---RULE_UPDATE---」という行をはさみ、ルール改修案がある場合は必ず以下の【厳格な2ブロック構成】で出力してください：\n\n"
+                                "【★重要規則：バージョン繰り上げ指定】\n"
+                                "現在適用中のルールタイトルに記載されているバージョン（例: ver.8.3）を特定し、必ずバージョン番号を「+0.1」繰り上げたタイトル（例: ver.8.4）に改訂・ナンバリングしてください！\n\n"
+                                "[ブロック1：今回の補正・改修部分のみの枠]\n"
+                                "【今回追加・修正された改修案（補正内容）】\n"
+                                "（例：ver.8.3 → ver.8.4 への改修点、新設・変更された箇条書き条項のみを記述）\n\n"
+                                "---FULL_MERGED_RULE---\n\n"
+                                "[ブロック2：バージョン繰り上げ済みのルール全文枠]\n"
+                                "【◯◯専用・評価表出力ルール（ver.8.X・...）】\n"
+                                "（※ヘッダータイトルのバージョンをver.8.Xから更新後の新バージョンに変更し、本文内の更新日時も最新にし、補正・改修部分を正しい該当項目内に差し込み・完全統合した状態の『最新ルール全文』を出力してください。末尾への単純追記ではなく、ルール文章全体に適切に挿入・結合された完成版全文にすること）\n"
                             )
 
-                        clean_tbl = (
-                            tbl_part.replace("```tsv", "").replace("```", "").strip()
-                        )
-                        res_df = pd.read_csv(
-                            io.StringIO(clean_tbl),
-                            sep="	",
-                            dtype=str,
-                            on_bad_lines="skip",
-                        )
+                            client = genai.Client(api_key=active_key)
+                            contents_list = [prompt]
+                            
+                            if res_file_inputs:
+                                for res_file in res_file_inputs:
+                                    if res_file.name.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+                                        res_file.seek(0)
+                                        mime_t = res_file.type
+                                        if not mime_t or mime_t == "application/octet-stream":
+                                            if res_file.name.lower().endswith(".pdf"):
+                                                mime_t = "application/pdf"
+                                            elif res_file.name.lower().endswith(".png"):
+                                                mime_t = "image/png"
+                                            elif res_file.name.lower().endswith((".jpg", ".jpeg")):
+                                                mime_t = "image/jpeg"
+                                        if mime_t:
+                                            contents_list.append(
+                                                types.Part.from_bytes(
+                                                    data=res_file.read(), mime_type=mime_t
+                                                )
+                                            )
 
-                        res_df = res_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore").fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
+                            response = client.models.generate_content(
+                                model=selected_model,
+                                contents=contents_list,
+                                config=types.GenerateContentConfig(
+                                    temperature=0.0, seed=42
+                                ),
+                            )
+                            ai_res_out = response.text
 
-                        for col_name in ["確定オッズ", "上り3F"]:
-                            if col_name in res_df.columns:
-                                def clean_decimal(v):
-                                    if pd.isna(v) or not str(v).strip():
-                                        return ""
-                                    try:
-                                        val = float(str(v).strip())
-                                        return f"{val:.1f}"
-                                    except Exception:
-                                        return str(v)
-                                res_df[col_name] = res_df[col_name].apply(clean_decimal)
+                            tbl_part = ai_res_out
+                            memo_part = "回顧コメントの抽出を完了しました。"
+                            rule_update_part = (
+                                "【ルール変更なし】現行ロジックのままで問題ありません。"
+                            )
 
-                        update_db_with_recap(selected_race, res_df, memo_part)
+                            if "---RESULT_MEMO---" in ai_res_out:
+                                tbl_part, rest_part = ai_res_out.split("---RESULT_MEMO---", 1)
+                                if "---RULE_UPDATE---" in rest_part:
+                                    memo_part, rule_update_part = rest_part.split(
+                                        "---RULE_UPDATE---", 1
+                                    )
+                                else:
+                                    memo_part = rest_part
+                            elif "---RULE_UPDATE---" in ai_res_out:
+                                tbl_part, rule_update_part = ai_res_out.split(
+                                    "---RULE_UPDATE---", 1
+                                )
 
-                        def highlight_ranks(row):
-                            rank_val = normalize_rank(row.get("確定着順", ""))
-                            if rank_val == "1":
-                                return [
-                                    "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
-                                ] * len(row)
-                            elif rank_val == "2":
-                                return [
-                                    "background-color: #223344; color: #00ffff; font-weight: bold;"
-                                ] * len(row)
-                            elif rank_val == "3":
-                                return [
-                                    "background-color: #332211; color: #ffaa55; font-weight: bold;"
-                                ] * len(row)
-                            return [""] * len(row)
+                            clean_tbl = (
+                                tbl_part.replace("```tsv", "").replace("```", "").strip()
+                            )
+                            res_df = pd.read_csv(
+                                io.StringIO(clean_tbl),
+                                sep="\t",
+                                dtype=str,
+                                on_bad_lines="skip",
+                            )
 
-                        st.success(
-                            f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
-                        )
+                            res_df = res_df.drop(columns=["軸ヒモ切り", "人気"], errors="ignore").fillna("").replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
-                        calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
-                        st.subheader("🏆 全着順 ＆ 予想照合結果")
-                        st.dataframe(
-                            res_df.style.hide(axis="index").apply(highlight_ranks, axis=1),
-                            use_container_width=True,
-                            height=calc_res_height,
-                            hide_index=True,
-                        )
+                            for col_name in ["確定オッズ", "上り3F"]:
+                                if col_name in res_df.columns:
+                                    def clean_decimal(v):
+                                        if pd.isna(v) or not str(v).strip():
+                                            return ""
+                                        try:
+                                            val = float(str(v).strip())
+                                            return f"{val:.1f}"
+                                        except Exception:
+                                            return str(v)
+                                    res_df[col_name] = res_df[col_name].apply(clean_decimal)
 
-                        st.subheader("📝 詳細レース回顧・長文見解")
-                        st.markdown(
-                            f"""
-                            <div class="recap-box">
-{memo_part.strip()}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
+                            update_db_with_recap(selected_race, res_df, memo_part)
 
-                        st.subheader("⚙️ 評価ルールの見直し・改修結果")
-                        rule_update_clean = rule_update_part.strip()
-                        if "【ルール変更なし】" in rule_update_clean:
+                            def highlight_ranks(row):
+                                rank_val = normalize_rank(row.get("確定着順", ""))
+                                if rank_val == "1":
+                                    return [
+                                        "background-color: #4a3b00; color: #ffd700; font-weight: bold;"
+                                    ] * len(row)
+                                elif rank_val == "2":
+                                    return [
+                                        "background-color: #223344; color: #00ffff; font-weight: bold;"
+                                    ] * len(row)
+                                elif rank_val == "3":
+                                    return [
+                                        "background-color: #332211; color: #ffaa55; font-weight: bold;"
+                                    ] * len(row)
+                                return [""] * len(row)
+
                             st.success(
-                                "✅ 今回のレース検証結果：現行ルール・ロジックのままで問題ありません。"
+                                f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                             )
-                        else:
-                            st.warning("⚠️ 新しいルール改修案が提案されました！")
 
-                            if "---FULL_MERGED_RULE---" in rule_update_clean:
-                                diff_summary, full_rule_body = rule_update_clean.split("---FULL_MERGED_RULE---", 1)
+                            calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
+                            st.subheader("🏆 全着順 ＆ 予想照合結果")
+                            st.dataframe(
+                                res_df.style.hide(axis="index").apply(highlight_ranks, axis=1),
+                                use_container_width=True,
+                                height=calc_res_height,
+                                hide_index=True,
+                            )
+
+                            st.subheader("📝 詳細レース回顧・長文見解")
+                            st.markdown(
+                                f"""
+                                <div class="recap-box">
+{memo_part.strip()}
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                            st.subheader("⚙️ 評価ルールの見直し・改修結果")
+                            rule_update_clean = rule_update_part.strip()
+                            if "【ルール変更なし】" in rule_update_clean:
+                                st.success(
+                                    "✅ 今回のレース検証結果：現行ルール・ロジックのままで問題ありません。"
+                                )
                             else:
-                                diff_summary = rule_update_clean
-                                full_rule_body = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
+                                st.warning("⚠️ 新しいルール改修案が提案されました！")
 
-                            st.markdown("#### 📌 1. 今回の補正・改修部分（バージョン更新内容）")
-                            st.code(diff_summary.strip(), language="text")
+                                if "---FULL_MERGED_RULE---" in rule_update_clean:
+                                    diff_summary, full_rule_body = rule_update_clean.split("---FULL_MERGED_RULE---", 1)
+                                else:
+                                    diff_summary = rule_update_clean
+                                    full_rule_body = f"{current_rule}\n\n=========================================\n【今回のレース回顧に基づく追記・改修案】\n=========================================\n{rule_update_clean}"
 
-                            st.markdown("#### 📋 2. 保存用：バージョン更新済み 完全統合ルール全文（ワンタップコピー用）")
-                            st.write("💡 **以下の枠内をコピーして「⚙️ ルール管理・アップデート」画面へそのまま貼り付け保存してください：**")
-                            st.code(full_rule_body.strip(), language="text")
+                                st.markdown("#### 📌 1. 今回の補正・改修部分（バージョン更新内容）")
+                                st.code(diff_summary.strip(), language="text")
 
-                    except Exception as e:
-                        st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
+                                st.markdown("#### 📋 2. 保存用：バージョン更新済み 完全統合ルール全文（ワンタップコピー用）")
+                                st.write("💡 **以下の枠内をコピーして「⚙️ ルール管理・アップデート」画面へそのまま貼り付け保存してください：**")
+                                st.code(full_rule_body.strip(), language="text")
+
+                        except Exception as e:
+                            st.error(f"❌ 回顧処理中にエラーが発生しました: {e}")
 
 
 # --------------------------------------------------
