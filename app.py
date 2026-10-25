@@ -2894,8 +2894,7 @@ if selected_menu == "📋 レース分析・予想":
                     and not files_group4
                     and not urls_group5_input.strip()
                 ):
-                    st.session_state["draft_toast_msg"] = ("warning", "⚠️ 追加保存するファイルまたはURLを入力してください！")
-                    st.rerun()
+                    st.warning("⚠️ 追加保存するファイルまたはURLを入力してください！")
                 else:
                     with st.spinner("💾 ファイル・データを下書き保存中..."):
                         target_name = draft_race_name.strip() if draft_race_name and draft_race_name.strip() else ""
@@ -2908,17 +2907,14 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group4,
                                 urls_group5_input,
                             )
-                            st.session_state["uploader_key_ver"] += 1
+                            # キーエラー防止の安全なインクリメント
+                            st.session_state["uploader_key_ver"] = st.session_state.get("uploader_key_ver", 0) + 1
                             st.session_state["selected_draft_race"] = actual_draft_name
-                            st.session_state["draft_toast_msg"] = (
-                                "success",
-                                f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を下書き保存しました！"
-                            )
                             st.session_state.pop("analyzed_df", None)
+                            st.toast(f"🎉 レース「{actual_draft_name}」にデータ（ファイル{saved_c}件/URL）を下書き保存しました！")
                             st.rerun()
                         except Exception as e:
-                            st.session_state["draft_toast_msg"] = ("error", f"❌ 保存中にエラーが発生しました: {e}")
-                            st.rerun()
+                            st.error(f"❌ 保存中にエラーが発生しました: {e}")
 
         with btn_col2:
             if st.button(
@@ -3050,7 +3046,7 @@ if selected_menu == "📋 レース分析・予想":
                         delete_draft(draft_race_name)
                         if "selected_draft_race" in st.session_state:
                             del st.session_state["selected_draft_race"]
-                        st.session_state["draft_toast_msg"] = ("success", f"🗑️ レース「{draft_race_name}」の下書きデータを削除しました！")
+                        st.toast(f"🗑️ レース「{draft_race_name}」の下書きデータを削除しました！")
                         st.session_state.pop("analyzed_df", None)
                         st.rerun()
 
