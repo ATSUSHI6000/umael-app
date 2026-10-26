@@ -1816,8 +1816,137 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
 
 
 # --------------------------------------------------
-# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数
+# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数群
 # --------------------------------------------------
+# --------------------------------------------------
+# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数（自動判別対応版）
+# --------------------------------------------------
+
+def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list, model_name):
+    client = genai.Client(api_key=api_key)
+
+    all_races_payload_text = ""
+    media_parts_all = []
+
+    for r_name in draft_races_list:
+        t1, p1, t2, p2, t3, p3, t4, p4, t5, _ = load_draft_data(r_name)
+        combined_r_text = f"\n\n=========================================\n【対象レースデータ: {r_name}】\n=========================================\n"
+        combined_r_text += f"{t1}\n{t2}\n{t3}\n{t4}\n{t5}"
+        all_races_payload_text += combined_r_text
+        media_parts_all.extend(p1 + p2 + p3 + p4)
+
+    # 全ルールテキストの準備（自動判別用）
+    rule_g1 = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+    rule_gen = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+    rule_hok = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+    rule_2g1 = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
+    rule_2gen = load_saved_rules(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
+    rule_3g1 = load_saved_rules(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
+    rule_3gen = load_saved_rules(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
+
+    if "自動判別" in selected_rule_option:
+        rules_instructions = f"""
+【★重要：レース毎のルール自動判別・適用指示】
+対象となる各レースのデータ（レース名、グレード、年齢条件、開催場など）を解析し、以下の7種類の評価ルールから【レースごとに最適なルールを自動判定して適用】してください！
+
+[利用可能ルール定義一覧]
+1. 👶 2歳G1専用ルール: (2歳限定のG1/Jpn1レースに適用)
+{rule_2g1}
+
+2. 👶 2歳G2・G3専用ルール: (2歳限定のG2/G3/OP/条件戦/新馬/未勝利に適用)
+{rule_2gen}
+
+3. 🐴 3歳G1専用ルール: (3歳限定のG1/Jpn1レースに適用)
+{rule_3g1}
+
+4. 🐴 3歳G2・G3専用ルール: (3歳限定のG2/G3/OP/条件戦/未勝利に適用)
+{rule_3gen}
+
+5. 🏆 G1専用ルール（古馬・混合）: (古馬・3歳以上のG1/Jpn1レースに適用)
+{rule_g1}
+
+6. 🌾 北海道・洋芝専用ルール: (函館・札幌の洋芝コース開催レースに適用)
+{rule_hok}
+
+7. 🏇 平場・G2・G3専用ルール（古馬・混合）: (上記以外の古馬・3歳以上条件戦/OP/G2/G3に適用)
+{rule_gen}
+"""
+    else:
+        rules_instructions = f"【指定適用ルール】\n{selected_rule_option}"
+
+    selection_prompt = f"""{rules_instructions}
+
+【★現地観戦用：全12Rから勝負5R厳選＆全頭分析プロンプト】
+あなたは競馬プロ解析AI「ウマエル」です。
+提供された本日の全12レース（および裏開催重賞）のデータから、本日勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
+
+【厳選5レースの選定絶対条件】
+1. **メインレース（11RまたはG1/G2/G3/Jpn1等の重賞）は【必ず（マストで）】選出に含めること。**
+2. 残りの4レースは、データ・展開・オッズ乖離から「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が高い」レースを厳選すること。
+3. 条件を満たせば、裏開催の重賞レースを選出対象に含めてもよい。
+4. **各レースの解析時、レースの条件（2歳戦/3歳戦/G1/洋芝/平場等）に応じた適切な評価基準を厳格に適用すること。**
+
+【出力形式】
+必ず以下のJSONフォーマットのみを出力してください。
+
+{{
+  "selected_races_summary": [
+    {{
+      "race_name": "選出されたレース名（例: 20261011_東京11R毎日王冠_G2）",
+      "is_main": true,
+      "reason": "選定理由（例: 本日のメイン重賞かつ軸信頼度Sのためマスト選出）",
+      "confidence": "S (鉄板軸) / A (有力軸) / B (波乱含み)",
+      "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)"
+    }}
+  ],
+  "races_detail": [
+    {{
+      "race_name": "20261011_東京11R毎日王冠_G2",
+      "confidence": "S (鉄板軸)",
+      "risk_level": "★☆☆ (本命堅調)",
+      "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
+      "recommended_tickets": [
+        "【単勝】 ⑤ （馬名）",
+        "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰"
+      ],
+      "horses": [
+        {{
+          "horse_num": 1,
+          "horse_name": "馬名",
+          "pop": "1",
+          "total_score": 92,
+          "eval": "S",
+          "score_shubahyou": 90,
+          "score_kettou": 92,
+          "score_choukyou": 95,
+          "score_kin5so": 90,
+          "score_tenkai": 90,
+          "score_baba": 92,
+          "jiku": "〇",
+          "himo": "",
+          "chu": "",
+          "kiri": "",
+          "memo": "詳細分析メモ"
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+    contents = [selection_prompt + "\n\n" + all_races_payload_text]
+    contents.extend(media_parts_all[:15])
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.0,
+            seed=42,
+        ),
+    )
+    return response.text
 
 def parse_json_selected_5r(result_text):
     try:
@@ -1832,7 +1961,7 @@ def parse_json_selected_5r(result_text):
         return None
 
 
-def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_name):
+def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list, model_name):
     client = genai.Client(api_key=api_key)
 
     all_races_payload_text = ""
@@ -1845,7 +1974,45 @@ def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_nam
         all_races_payload_text += combined_r_text
         media_parts_all.extend(p1 + p2 + p3 + p4)
 
-    selection_prompt = f"""{rules_text}
+    rule_g1 = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+    rule_gen = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+    rule_hok = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+    rule_2g1 = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
+    rule_2gen = load_saved_rules(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
+    rule_3g1 = load_saved_rules(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
+    rule_3gen = load_saved_rules(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
+
+    if "自動判別" in selected_rule_option:
+        rules_instructions = f"""
+【★重要：レース毎のルール自動判別・適用指示】
+対象となる各レースのデータ（レース名、グレード、年齢条件、開催場など）を解析し、以下の7種類の評価ルールから【レースごとに最適なルールを自動判定して適用】してください！
+
+[利用可能ルール定義一覧]
+1. 👶 2歳G1専用ルール: (2歳限定のG1/Jpn1レースに適用)
+{rule_2g1}
+
+2. 👶 2歳G2・G3専用ルール: (2歳限定のG2/G3/OP/条件戦/新馬/未勝利に適用)
+{rule_2gen}
+
+3. 🐴 3歳G1専用ルール: (3歳限定のG1/Jpn1レースに適用)
+{rule_3g1}
+
+4. 🐴 3歳G2・G3専用ルール: (3歳限定のG2/G3/OP/条件戦/未勝利に適用)
+{rule_3gen}
+
+5. 🏆 G1専用ルール（古馬・混合）: (古馬・3歳以上のG1/Jpn1レースに適用)
+{rule_g1}
+
+6. 🌾 北海道・洋芝専用ルール: (函館・札幌の洋芝コース開催レースに適用)
+{rule_hok}
+
+7. 🏇 平場・G2・G3専用ルール（古馬・混合）: (上記以外の古馬・3歳以上条件戦/OP/G2/G3に適用)
+{rule_gen}
+"""
+    else:
+        rules_instructions = f"【指定適用ルール】\n{selected_rule_option}"
+
+    selection_prompt = f"""{rules_instructions}
 
 【★現地観戦用：全12Rから勝負5R厳選＆全頭分析プロンプト】
 あなたは競馬プロ解析AI「ウマエル」です。
@@ -1855,6 +2022,7 @@ def analyze_12r_and_select_top5(api_key, rules_text, draft_races_list, model_nam
 1. **メインレース（11RまたはG1/G2/G3/Jpn1等の重賞）は【必ず（マストで）】選出に含めること。**
 2. 残りの4レースは、データ・展開・オッズ乖離から「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が高い」レースを厳選すること。
 3. 条件を満たせば、裏開催の重賞レースを選出対象に含めてもよい。
+4. **各レースの解析時、レースの条件（2歳戦/3歳戦/G1/洋芝/平場等）に応じた適切な評価基準を厳格に適用すること。**
 
 【出力形式】
 必ず以下のJSONフォーマットのみを出力してください。
@@ -3265,31 +3433,13 @@ if selected_menu == "📋 レース分析・予想":
 
 
 # --------------------------------------------------
-# 🏇 2. 現地観戦用（勝負5R厳選） メニュー
+# 🏇 2. 現地観戦用（勝負5R厳選） メニュー UI
 # --------------------------------------------------
 
 elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
-    rule_type = st.radio(
-        "今回適用する評価ルールを選択してください：",
-        [
-            "🏆 G1専用ルール",
-            "🏇 平場・G2・G3専用ルール",
-            "🌾 北海道・洋芝専用ルール",
-        ],
-        horizontal=True,
-    )
-
-    if "G1専用" in rule_type:
-        active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-    elif "北海道" in rule_type:
-        active_selected_rule = load_saved_rules(
-            RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
-        )
-    else:
-        active_selected_rule = load_saved_rules(
-            RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
-        )
-
+    st.info("💡 **【🤖 レース別ルール自動判別モード（全自動）】** 蓄積された各レースのデータ（2歳/3歳/G1/洋芝/平場等）をAIが全自動解析し、レースごとに最適なルールを適用して勝負5Rを厳選します。")
+    
+    active_selected_rule = "🤖 AIによるレース別ルール自動判別モード"
     active_key = load_api_key()
     render_field_mode_ui(active_key, active_selected_rule, selected_model)
 
