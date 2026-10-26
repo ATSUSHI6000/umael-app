@@ -31,6 +31,10 @@ DATA_DIR = "data"
 RULE_G1_FILE = "saved_rules_g1.txt"
 RULE_GENERAL_FILE = "saved_rules_general.txt"
 RULE_HOKKAIDO_FILE = "saved_rules_hokkaido.txt"
+RULE_2YO_G1_FILE = "saved_rules_2yo_g1.txt"
+RULE_2YO_GEN_FILE = "saved_rules_2yo_gen.txt"
+RULE_3YO_G1_FILE = "saved_rules_3yo_g1.txt"
+RULE_3YO_GEN_FILE = "saved_rules_3yo_gen.txt"
 API_KEY_FILE = "api_key.txt"
 DRAFTS_DIR = "race_drafts"
 
@@ -92,6 +96,12 @@ DEFAULT_HOKKAIDO_RULES = """【平場・G2・G3 北海道・洋芝（函館・�
 ■ 8. 各評価点計算式
 """
 
+# 2歳・3歳専用デフォルトルールの自動生成
+DEFAULT_2YO_G1_RULES = DEFAULT_G1_RULES.replace("【G1専用", "【2歳G1専用")
+DEFAULT_2YO_GEN_RULES = DEFAULT_GENERAL_RULES.replace("【平場・G2・G3専用", "【2歳G2・G3専用")
+DEFAULT_3YO_G1_RULES = DEFAULT_G1_RULES.replace("【G1専用", "【3歳G1専用")
+DEFAULT_3YO_GEN_RULES = DEFAULT_GENERAL_RULES.replace("【平場・G2・G3専用", "【3歳G2・G3専用")
+
 
 # --------------------------------------------------
 # 🛠 共通ヘルパー関数・ファイル入出力・正規化定義
@@ -127,7 +137,6 @@ def clean_pop_number(val):
 
 
 def extract_year_from_race_name(race_name):
-    """レース名から年度を取得。年度が含まれない場合は当年を使う。"""
     current_year = time.strftime("%Y")
     if race_name is None or not str(race_name).strip():
         return current_year
@@ -641,7 +650,6 @@ def normalize_rank(val):
 
 
 def convert_to_circled_numbers(text):
-    """馬番の数字のみを丸数字（①〜⑳）に変換する（金額、点数、頭数、券種名などの単位付き数字は保護する）"""
     if not text or not isinstance(text, str):
         return text
 
@@ -772,7 +780,6 @@ def sanitize_dataframe_columns(df):
         if col not in df.columns:
             df[col] = ""
 
-    # 基本メモ・評価の生成処理
     def calc_eval_and_marks(row):
         score_val = row.get("総合スコア", 0)
         try:
@@ -830,11 +837,9 @@ def sanitize_dataframe_columns(df):
 
     df = df.apply(calc_eval_and_marks, axis=1)
 
-    # 🎯 軸（〇）は全頭中「スコア最上位の1頭（最高評価）」のみに厳格固定するクレンジング
     if "レース名" in df.columns:
         processed_groups = []
         for r_name, group in df.groupby("レース名", sort=False):
-            # 総合スコア降順ソート
             if "総合スコア" in group.columns:
                 group["_sort_num"] = pd.to_numeric(group["総合スコア"], errors="coerce").fillna(0)
                 group = group.sort_values(by="_sort_num", ascending=False).drop(columns=["_sort_num"])
@@ -845,7 +850,6 @@ def sanitize_dataframe_columns(df):
                 r_dict = row.to_dict()
                 c_eval = str(r_dict.get("評価", "")).strip().upper()
 
-                # スコア最上位（1頭目）かつ (S評価または最高点) の場合のみ「軸」を付与
                 if not has_assigned_jiku and idx == 0 and c_eval in ["S", "S+", "A+"]:
                     r_dict["軸"] = "〇"
                     r_dict["ヒモ"] = ""
@@ -853,7 +857,6 @@ def sanitize_dataframe_columns(df):
                     r_dict["切り"] = ""
                     has_assigned_jiku = True
                 else:
-                    # 2頭目以降は絶対に軸にさせず、評価に応じてヒモ・注・切りに振り分け
                     r_dict["軸"] = ""
                     if c_eval in ["S", "S+", "A+", "A", "B+"]:
                         r_dict["ヒモ"] = "〇"
@@ -1413,6 +1416,11 @@ def parse_json_ai_output(result_text):
     return df
 
 
+# --------------------------------------------------
+# 🧠 AI解析・再評価・厳選関数群
+# --------------------------------------------------
+
+
 def analyze_data_with_gemini(
     api_key,
     active_rules,
@@ -1428,13 +1436,14 @@ def analyze_data_with_gemini(
     model_name,
 ):
     client = genai.Client(api_key=api_key)
+    prompt_rules = str(active_rules)
 
-    json_prompt = f"""{active_rules}
+    json_prompt = f"""{prompt_rules}
 
 【★レース名・グレードの厳格特定＆適合ルール（絶対厳守）】
 1. 添付された出馬表・馬柱データから、「開催日（西暦8桁 YYYYMMDD）」「正確なレース名」「実際のレースグレード（G1, Jpn1, G2, Jpn2, G3, Jpn3, L, OP, 3歳以上1勝クラス等）」を正確に検知してください。
 2. 上記で適用指示された評価ルールに基づき評価を行いますが、実際のレースデータがG1/Jpn1以外のグレード（例: G2, G3, OP, 条件戦など）である場合、G1専用の評価基準や表記を誤って全適用してはいけません。実際のレースのグレードに完全に合致させた出力を行ってください。
-3. `race_name` は必ず以下のフォーマットで生成・出力してください！
+3. race_name は必ず以下のフォーマットで生成・出力してください！
 
 フォーマット： YYYYMMDD_レース名_グレード
 （例：20261007_ジャパンダートクラシック_Jpn1）
@@ -1443,7 +1452,7 @@ def analyze_data_with_gemini(
 （例：20261012_東京11Rペルセウスステークス_OP）
 
 【★レース質 ＆ 展開予想シミュレーションの必須生成指示】
-ルール仕様に基づき、本レースの『レース質（瞬発力/持続力/消耗戦/加速戦）』および『展開予想（ペース・脚質位置取り・ハナ主張・中盤隊列・直線の攻防・勝ち馬の決定打）』を臨場感ある文章で詳細に作成し、`race_quality_and_tenkai` フィールドに出力してください。
+ルール仕様に基づき、本レースの『レース質（瞬発力/持続力/消耗戦/加速戦）』および『展開予想（ペース・脚質位置取り・ハナ主張・中盤隊列・直線の攻防・勝ち馬の決定打）』を臨場感ある文章で詳細に作成し、race_quality_and_tenkai フィールドに出力してください。
 
 【最重要・出走馬の確定判定指示】
 添付されているテキストデータおよびスクショ画像/PDFから、今回のレースの【本物の出走馬一覧】を視覚的にも確認して抽出してください。
@@ -1483,10 +1492,10 @@ def analyze_data_with_gemini(
 以下のJSON形式のみを出力してください。
 
 {{
-  "race_name": "必ず YYYYMMDD_レース名_グレード 形式（例：20261011_毎日王冠_G2）",
+  "race_name": "必ず YYYYMMDD_レース名_グレード 形式",
   "confidence": "軸馬信頼度判定（例：S (鉄板軸) / A (有力軸) / B (波乱含み)）",
   "risk_level": "波乱度判定（例：★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)）",
-  "race_quality_and_tenkai": "🏁 【対象レース名】レース質 ＆ 展開予想シミュレーション\\n【レース質：持続力戦】\\n...\\n\\n【展開予想】\\nペース：ミドルペース\\n逃げ：①...\\n...",
+  "race_quality_and_tenkai": "🏁 【対象レース名】レース質 ＆ 展開予想シミュレーション\\n...",
   "recommended_tickets": [
     "【単勝】 ⑤ （馬名）",
     "【馬連 軸1頭流し】 ⑤ ＝ ①, ②, ⑯, ⑰",
@@ -1495,10 +1504,10 @@ def analyze_data_with_gemini(
   "horses": [
     {{
       "horse_num": 1,
-      "horse_name": "メイン出馬表に存在する正確な馬名",
+      "horse_name": "馬名",
       "pop": "予想人気",
       "total_score": 85,
-      "eval": "評価ランク（S, A+, A, B+, B, C等）",
+      "eval": "評価ランク",
       "score_shubahyou": 85,
       "score_kettou": 85,
       "score_choukyou": 85,
@@ -1509,7 +1518,7 @@ def analyze_data_with_gemini(
       "himo": "ヒモなら〇、違えば空文字",
       "chu": "注なら〇、違えば空文字",
       "kiri": "切りなら〇、違えば空文字",
-      "memo": "本命理由・血統・近5走・展開相性・プロ推奨理由などの詳細分析メモ"
+      "memo": "詳細分析メモ"
     }}
   ]
 }}
@@ -1552,102 +1561,183 @@ def analyze_data_with_gemini(
                 raise e
 
 
-# --------------------------------------------------
-# 🔄 直前追加データ（パドック・馬体重）再評価＆微調整ロジック
-# --------------------------------------------------
-
-def reevaluate_race_data_with_gemini(api_key, active_rules, current_df, add_text, add_media_parts, model_name):
+def reevaluate_race_data_with_gemini(
+    api_key,
+    active_rules,
+    current_tenkai,
+    current_tickets,
+    current_horses_str,
+    add_text,
+    add_parts,
+    model_name,
+):
     client = genai.Client(api_key=api_key)
+    prompt_rules = str(active_rules)
 
-    race_title = current_df["レース名"].iloc[0] if "レース名" in current_df.columns else "対象レース"
-    current_tenkai = current_df["レース質展開予想"].iloc[0] if "レース質展開予想" in current_df.columns else ""
-    current_tickets = current_df["推奨買い目"].iloc[0] if "推奨買い目" in current_df.columns else ""
-    
-    cols_horses = [c for c in ["馬番", "馬名", "総合スコア", "評価", "予想人気", "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点", "軸", "ヒモ", "注", "切り", "メモ"] if c in current_df.columns]
-    current_horses_str = current_df[cols_horses].to_string(index=False)
+    json_prompt = f"""{prompt_rules}
 
-    reeval_prompt = f"""{active_rules}
+【★追加データによる差分再評価＆アップデート指示】
+事前に解析された「現在の予想データ（展開予想・買い目・馬ごとの評価・メモ）」に対し、新たに追加されたデータ（馬場情報・パドック・直前オッズ・追加のプロ予想等）を精査し、必要な部分のみを修正・更新してください。
 
-【★評価済みレースの直前追加データ再検証・見解/買い目修正＆微調整プロンプト】
-あなたは競馬プロ解析AI「ウマエル」です。
-事前に解析・算出済みの【現在のレース評価データ・展開見解・買い目】に対し、直前に届いた【追加情報（パドック気配、馬体重増減、直前馬場、ニュース、メモ、画像等）】を統合解析し、評価スコア・展開見解・推奨買い目の修正または現状維持を判定してください。
-
-【現在のレース全頭評価データ】:
-{current_horses_str}
-
-【現在の展開見解（レース質＆展開予想）】:
+=== 【現在の展開予想】 ===
 {current_tenkai}
 
-【現在の推奨買い目】:
+=== 【現在の推奨買い目】 ===
 {current_tickets}
 
-【直前に届いた追加データ（テキスト・メモ）】:
+=== 【現在の全出走馬評価データ】 ===
+{current_horses_str}
+
+=== 【新しく追加されたデータ】 ===
 {add_text}
 
-【判定・出力ルール（厳格厳守）】:
-1. 追加データを精査し、既存の「スコア・印」「レース展開見解」「推奨買い目」に変更を加えるべきか慎重に判断してください。
-2. **【評価・見解・買い目に変化がない場合】**:
-   - `has_changes` を `false` に設定してください。
-   - `change_summary` に「追加情報を解析しましたが、現在の評価・総合スコアに変更はありません（現状維持）。」と明記してください。
-   - `race_quality_and_tenkai` および `recommended_tickets` には現在の内容をそのまま格納してください。
-   - `horses` には現在の評価データをそのまま格納してください。
-3. **【評価・見解・買い目に修正・変化がある場合】**:
-   - `has_changes` を `true` に設定してください。
-   - `change_summary` に「どの馬の評価・スコアをなぜ微調整したか（変更前後のスコア比較含む）、展開見解や買い目をどう変更したか」の詳細理由を明確に記述してください。
-   - `race_quality_and_tenkai` には修正後の最新レース展開見解を格納してください。
-   - `recommended_tickets` には修正後の最新推奨買い目リスト（丸囲み数字 ①, ②... を使用）を格納してください。
-   - `horses` には修正後の全出走馬データを格納してください。
-
-【出力形式】:
+【出力形式】
 以下のJSON形式のみを出力してください。
 
 {{
-  "has_changes": true または false,
-  "change_summary": "現状維持の理由 または 修正・微調整されたポイントの詳細解説",
-  "race_name": "{race_title}",
-  "confidence": "軸馬信頼度",
-  "risk_level": "波乱度判定",
-  "race_quality_and_tenkai": "修正後（または維持）のレース質＆展開予想シミュレーション文章",
-  "recommended_tickets": [
-    "修正後（または維持）の推奨買い目1",
-    "修正後（または維持）の推奨買い目2"
-  ],
+  "has_changes": true,
+  "change_summary": "変更点の概要メモ",
+  "race_quality_and_tenkai": "最新の展開予想",
+  "recommended_tickets": [ "最新の買い目" ],
   "horses": [
     {{
       "horse_num": 1,
       "horse_name": "馬名",
-      "pop": "予想人気",
+      "pop": "人気",
       "total_score": 85,
-      "eval": "評価ランク",
+      "eval": "評価",
       "score_shubahyou": 85,
       "score_kettou": 85,
       "score_choukyou": 85,
       "score_kin5so": 85,
       "score_tenkai": 85,
       "score_baba": 85,
-      "jiku": "〇または空文字",
-      "himo": "〇または空文字",
-      "chu": "〇または空文字",
-      "kiri": "〇または空文字",
-      "memo": "詳細分析メモ（追加データ反映版）"
+      "jiku": "〇",
+      "himo": "",
+      "chu": "",
+      "kiri": "",
+      "memo": "最新メモ"
     }}
   ]
 }}
 """
 
-    contents = [reeval_prompt]
-    contents.extend(add_media_parts)
+    contents_payload = [json_prompt]
+    contents_payload.extend(add_parts)
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.0,
-            seed=42,
-        ),
-    )
-    return response.text
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents_payload,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                    seed=42,
+                ),
+            )
+            return response.text
+        except Exception as e:
+            err_msg = str(e)
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                else:
+                    raise Exception(
+                        "⚠️ Googleサーバーが一時的に混雑しています。"
+                    )
+            elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                raise Exception("⚠️ 本日の無料枠上限に達しました。")
+            else:
+                raise e
+
+
+def generate_field_selected_races_with_gemini(
+    api_key,
+    rules_text,
+    all_races_text,
+    all_parts,
+    model_name,
+):
+    client = genai.Client(api_key=api_key)
+    p_rules = str(rules_text)
+
+    json_prompt = f"""{p_rules}
+
+【★現地観戦用・全12レースから厳選5レースピッキング指示】
+提供された本日の全12レースのデータから、最も勝負度が高く的中期待値の大きい【メインレース1レース ＋ 厳選4レース ＝ 計5レース】を選定し、各レースの予想データを出力してください。
+
+=== 【本日の全12レースデータ】 ===
+{all_races_text}
+
+【出力形式】
+以下のJSONフォーマットのみを出力してください。
+
+{{
+  "selected_races": [
+    {{
+      "race_name": "YYYYMMDD_レース名_グレード",
+      "confidence": "S",
+      "risk_level": "★☆☆",
+      "race_quality_and_tenkai": "展開予想テキスト",
+      "recommended_tickets": [ "買い目1" ],
+      "horses": [
+        {{
+          "horse_num": 1,
+          "horse_name": "馬名",
+          "pop": "1",
+          "total_score": 90,
+          "eval": "S",
+          "score_shubahyou": 90,
+          "score_kettou": 90,
+          "score_choukyou": 90,
+          "score_kin5so": 90,
+          "score_tenkai": 90,
+          "score_baba": 90,
+          "jiku": "〇",
+          "himo": "",
+          "chu": "",
+          "kiri": "",
+          "memo": "メモ"
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+    contents_payload = [json_prompt]
+    contents_payload.extend(all_parts)
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents_payload,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.0,
+                    seed=42,
+                ),
+            )
+            return response.text
+        except Exception as e:
+            err_msg = str(e)
+            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                else:
+                    raise Exception(
+                        "⚠️ Googleサーバーが一時的に混雑しています。"
+                    )
+            elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                raise Exception("⚠️ 本日の無料枠上限に達しました。")
+            else:
+                raise e
 
 
 def render_re_evaluation_section(current_df, active_rules, selected_model):
@@ -1685,8 +1775,20 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
                         add_text_content, add_media_parts = prepare_file_parts(add_files, pdf_page_option="全ページ")
                         combined_add_text = add_text_content + "\n" + add_memo.strip()
 
+                        current_tenkai = str(current_df["レース質展開予想"].iloc[0]) if "レース質展開予想" in current_df.columns else ""
+                        current_tickets = str(current_df["推奨買い目"].iloc[0]) if "推奨買い目" in current_df.columns else ""
+                        cols_to_inc = [c for c in ["馬番", "馬名", "総合スコア", "評価", "予想人気", "軸", "ヒモ", "注", "切り", "メモ"] if c in current_df.columns]
+                        current_horses_str = current_df[cols_to_inc].to_string(index=False)
+
                         raw_json = reevaluate_race_data_with_gemini(
-                            active_key, active_rules, current_df, combined_add_text, add_media_parts, selected_model
+                            active_key,
+                            active_rules,
+                            current_tenkai,
+                            current_tickets,
+                            current_horses_str,
+                            combined_add_text,
+                            add_media_parts,
+                            selected_model,
                         )
 
                         clean_json = raw_json.strip()
@@ -1881,11 +1983,10 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         details = res_data.get("races_detail", [])
         if details:
             tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
-            tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
-        tabs = st.tabs(tab_titles)
+            tabs = st.tabs(tab_titles)
 
-        for idx, tab in enumerate(tabs):
-            with tab:
+            for idx, tab in enumerate(tabs):
+                with tab:
                     r_detail = details[idx]
                     h_list = r_detail.get("horses", [])
                     if h_list:
@@ -2015,7 +2116,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
         st.warning("⚠️ 有効な出走馬データが見つかりませんでした。")
         return
 
-    # 1. 総合スコアが高い順（S→C, 高得点→低得点）に降順ソート
     if "総合スコア" in df.columns:
         df["_sort_score"] = pd.to_numeric(
             df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
@@ -2029,7 +2129,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
         else "競馬予想解析"
     )
 
-    # 2. 表示用カラムを正規カラムのみに厳格カット（余計な重複カラムは100%遮断）
     target_order = [
         "馬番", "馬名", "総合スコア", "評価", "予想人気",
         "出馬表点", "血統点", "調教点", "近5走点", "展開点", "馬場点",
@@ -2153,7 +2252,6 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
         active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
         render_re_evaluation_section(df, active_selected_rule, "gemini-3.8-flash")
 
-    # サマリー描画関数
     def render_summary_body():
         st.markdown(
             f"<h2 style='text-align: center; color: #f39c12; margin-bottom:20px;'>🏇 {race_title} 🏇</h2>",
@@ -2323,11 +2421,8 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
     detail_choice = "📊 詳細全データ表（評価順）"
 
     if view_mode_override is not None:
-        # 共有URL側では、画面先頭で描画したラジオの選択結果を受け取る。
-        # 関数内で二重にラジオを描画しない。
         view_mode = view_mode_override
     elif is_viewer_mode:
-        # 互換用：他の呼び出し元から共有モードを直接呼ばれた場合も切替可能にする。
         race_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(race_title)).strip("_")[:80] or "race"
         view_state_key = f"shared_view_mode_{race_key}"
 
@@ -2598,7 +2693,6 @@ mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
 if mode_param == "share" and race_param:
-    # 共有画面専用のUIクリーンアップ
     st.markdown("""
     <style>
         [data-testid="stSidebar"] { display: none !important; }
@@ -2667,7 +2761,6 @@ if logo_path:
     with open(logo_path, "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-# 🏇 ヘッダー ＆ ロゴ横並び ＆ 設定ポップオーバー
 head_col1, head_col2 = st.columns([4.2, 1])
 
 with head_col1:
@@ -2753,26 +2846,38 @@ if selected_menu == "📋 レース分析・予想":
     rule_type = st.radio(
         "今回解析するレースのルールを選択してください：",
         [
-            "🏆 G1専用ルール",
-            "🏇 平場・G2・G3専用ルール",
+            "🏆 G1専用ルール（古馬・混合）",
+            "🏇 平場・G2・G3専用ルール（古馬・混合）",
             "🌾 北海道・洋芝専用ルール",
+            "👶 2歳G1専用ルール",
+            "👶 2歳G2・G3専用ルール",
+            "🐴 3歳G1専用ルール",
+            "🐴 3歳G2・G3専用ルール",
         ],
         horizontal=True,
     )
 
-    if "G1専用" in rule_type:
+    if "2歳G1" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
+        st.info("💡 現在 【 👶 2歳G1専用ルール 】 が選択されています。")
+    elif "2歳G2" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
+        st.info("💡 現在 【 👶 2歳G2・G3専用ルール 】 が選択されています。")
+    elif "3歳G1" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
+        st.info("💡 現在 【 🐴 3歳G1専用ルール 】 が選択されています。")
+    elif "3歳G2" in rule_type:
+        active_selected_rule = load_saved_rules(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
+        st.info("💡 現在 【 🐴 3歳G2・G3専用ルール 】 が選択されています。")
+    elif "G1専用" in rule_type:
         active_selected_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-        st.info("💡 現在 【 🏆 G1専用ルール 】 が選択されています。")
+        st.info("💡 現在 【 🏆 G1専用ルール（古馬・混合） 】 が選択されています。")
     elif "北海道" in rule_type:
-        active_selected_rule = load_saved_rules(
-            RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
-        )
+        active_selected_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
         st.info("💡 現在 【 🌾 北海道・洋芝専用ルール 】 が選択されています。")
     else:
-        active_selected_rule = load_saved_rules(
-            RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
-        )
-        st.info("💡 現在 【 🏇 平場・G2・G3専用ルール 】 が選択されています。")
+        active_selected_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+        st.info("💡 現在 【 🏇 平場・G2・G3専用ルール（古馬・混合） 】 が選択されています。")
 
     st.divider()
 
@@ -2838,7 +2943,6 @@ if selected_menu == "📋 レース分析・予想":
 
     uploader_ver = st.session_state.get("uploader_key_ver", 0)
 
-    # 4つのアップロード枠を並列配置（ラベルから形式表記を削除してスッキリ化）
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -2873,7 +2977,6 @@ if selected_menu == "📋 レース分析・予想":
             key=f"fg4_{uploader_ver}",
         )
 
-    # PDFの読み込み設定は4枠の下に独立配置（これで枠の高さがキレイに揃います）
     pdf_page_opt = st.radio(
         "📄 競馬ブックPDFの読み込み範囲",
         ["1ページ目のみ（推奨）", "全ページ読み込む"],
@@ -2916,7 +3019,6 @@ if selected_menu == "📋 レース分析・予想":
                                 files_group4,
                                 urls_group5_input,
                             )
-                            # キーエラー防止の安全なインクリメント
                             st.session_state["uploader_key_ver"] = st.session_state.get("uploader_key_ver", 0) + 1
                             st.session_state["selected_draft_race"] = actual_draft_name
                             st.session_state.pop("analyzed_df", None)
@@ -3195,28 +3297,26 @@ elif selected_menu == "🏇 現地観戦用（勝負5R厳選）":
 elif selected_menu == "⚙️ ルール管理・アップデート":
     st.subheader("⚙️ 解析ルールの管理・アップデート")
     st.write(
-        "「G1専用」「平場・G2・G3専用」「北海道・洋芝専用」の各ルールテキストをアップロード＆保存して更新できます。"
+        "「G1専用」「平場・G2・G3」「北海道・洋芝」「2歳G1」「2歳G2・G3」「3歳G1」「3歳G2・G3」の各ルールテキストをアップロード＆保存して更新できます。"
     )
 
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
-        "🏆 G1専用ルールの設定",
-        "🏇 平場・G2・G3専用ルールの設定",
-        "🌾 北海道・洋芝専用ルールの設定",
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7 = st.tabs([
+        "🏆 G1専用(古馬/混合)",
+        "🏇 平場・G2・G3(古馬/混合)",
+        "🌾 北海道・洋芝専用",
+        "👶 2歳G1専用",
+        "👶 2歳G2・G3専用",
+        "🐴 3歳G1専用",
+        "🐴 3歳G2・G3専用",
     ])
 
-    # --------------------------------------------------
-    # 🏆 1. G1専用ルール
-    # --------------------------------------------------
+    # 1. G1専用ルール(古馬/混合)
     with sub_tab1:
-        st.markdown("#### 🏆 G1専用ルールのアップロード ＆ 保存")
+        st.markdown("#### 🏆 G1専用ルール（古馬/混合）のアップロード ＆ 保存")
         current_g1_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-
         col_g1_1, col_g1_2 = st.columns([2, 1])
-
         with col_g1_1:
-            up_g1 = st.file_uploader(
-                "📂 G1用ルールテキスト (.txt) を選択", type=["txt"], key="up_g1_file_v5"
-            )
+            up_g1 = st.file_uploader("📂 G1用ルールテキスト (.txt) を選択", type=["txt"], key="up_g1_file_v5")
             if up_g1 is not None:
                 uploaded_g1_text = up_g1.read().decode("utf-8", errors="ignore")
                 if uploaded_g1_text.strip() and uploaded_g1_text != st.session_state.get("last_up_g1_text"):
@@ -3225,7 +3325,6 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
                     st.session_state["last_up_g1_text"] = uploaded_g1_text
                     st.toast("🎉 アップロードしたG1ルールを自動読み込み＆保存しました！")
                     st.rerun()
-
         with col_g1_2:
             st.write("")
             if st.button("🔄 G1初期ルールに戻す", key="btn_g1_def_v5", use_container_width=True):
@@ -3238,38 +3337,21 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         if "g1_rule_area_input" not in st.session_state:
             st.session_state["g1_rule_area_input"] = current_g1_rule
 
-        g1_input_text = st.text_area(
-            "G1専用ルールテキスト（直接編集可能）",
-            height=300,
-            key="g1_rule_area_input"
-        )
-
-        if st.button(
-            "💾 G1専用ルールとして更新・保存する",
-            use_container_width=True,
-            key="save_g1_btn_v5",
-        ):
+        g1_input_text = st.text_area("G1専用ルールテキスト（直接編集可能）", height=300, key="g1_rule_area_input")
+        if st.button("💾 G1専用ルールとして更新・保存する", use_container_width=True, key="save_g1_btn_v5"):
             if g1_input_text.strip():
                 save_rules_to_file(RULE_G1_FILE, g1_input_text)
-                st.toast("🎉 G1専用ルールを更新・保存しました！次回からも自動適用されます！")
+                st.toast("🎉 G1専用ルールを更新・保存しました！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
-    # --------------------------------------------------
-    # 🏇 2. 平場・G2・G3専用ルール
-    # --------------------------------------------------
+    # 2. 平場・G2・G3専用ルール(古馬/混合)
     with sub_tab2:
-        st.markdown("#### 🏇 平場・G2・G3専用ルールのアップロード ＆ 保存")
+        st.markdown("#### 🏇 平場・G2・G3専用ルール（古馬/混合）のアップロード ＆ 保存")
         current_gen_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
-
         col_gen_1, col_gen_2 = st.columns([2, 1])
-
         with col_gen_1:
-            up_gen = st.file_uploader(
-                "📂 平場・G2・G3用ルールテキスト (.txt) を選択",
-                type=["txt"],
-                key="up_gen_file_v5",
-            )
+            up_gen = st.file_uploader("📂 平場・G2・G3用ルールテキスト (.txt) を選択", type=["txt"], key="up_gen_file_v5")
             if up_gen is not None:
                 uploaded_gen_text = up_gen.read().decode("utf-8", errors="ignore")
                 if uploaded_gen_text.strip() and uploaded_gen_text != st.session_state.get("last_up_gen_text"):
@@ -3278,7 +3360,6 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
                     st.session_state["last_up_gen_text"] = uploaded_gen_text
                     st.toast("🎉 アップロードした平場・G2・G3ルールを自動読み込み＆保存しました！")
                     st.rerun()
-
         with col_gen_2:
             st.write("")
             if st.button("🔄 平場・G2・G3初期ルールに戻す", key="btn_gen_def_v5", use_container_width=True):
@@ -3291,38 +3372,21 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         if "gen_rule_area_input" not in st.session_state:
             st.session_state["gen_rule_area_input"] = current_gen_rule
 
-        gen_input_text = st.text_area(
-            "平場・G2・G3専用ルールテキスト（直接編集可能）",
-            height=300,
-            key="gen_rule_area_input"
-        )
-
-        if st.button(
-            "💾 平場・G2・G3専用ルールとして更新・保存する",
-            use_container_width=True,
-            key="save_gen_btn_v5",
-        ):
+        gen_input_text = st.text_area("平場・G2・G3専用ルールテキスト（直接編集可能）", height=300, key="gen_rule_area_input")
+        if st.button("💾 平場・G2・G3専用ルールとして更新・保存する", use_container_width=True, key="save_gen_btn_v5"):
             if gen_input_text.strip():
                 save_rules_to_file(RULE_GENERAL_FILE, gen_input_text)
-                st.toast("🎉 平場・G2・G3専用ルールを更新・保存しました！次回からも自動適用されます！")
+                st.toast("🎉 平場・G2・G3専用ルールを更新・保存しました！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
-    # --------------------------------------------------
-    # 🌾 3. 北海道・洋芝専用ルール
-    # --------------------------------------------------
+    # 3. 北海道・洋芝専用ルール
     with sub_tab3:
         st.markdown("#### 🌾 北海道・洋芝専用ルールのアップロード ＆ 保存")
         current_hok_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
-
         col_hok_1, col_hok_2 = st.columns([2, 1])
-
         with col_hok_1:
-            up_hok = st.file_uploader(
-                "📂 北海道・洋芝用ルールテキスト (.txt) を選択",
-                type=["txt"],
-                key="up_hok_file_v5",
-            )
+            up_hok = st.file_uploader("📂 北海道・洋芝用ルールテキスト (.txt) を選択", type=["txt"], key="up_hok_file_v5")
             if up_hok is not None:
                 uploaded_hok_text = up_hok.read().decode("utf-8", errors="ignore")
                 if uploaded_hok_text.strip() and uploaded_hok_text != st.session_state.get("last_up_hok_text"):
@@ -3331,7 +3395,6 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
                     st.session_state["last_up_hok_text"] = uploaded_hok_text
                     st.toast("🎉 アップロードした北海道・洋芝ルールを自動読み込み＆保存しました！")
                     st.rerun()
-
         with col_hok_2:
             st.write("")
             if st.button("🔄 北海道・洋芝初期ルールに戻す", key="btn_hok_def_v5", use_container_width=True):
@@ -3344,20 +3407,151 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         if "hok_rule_area_input" not in st.session_state:
             st.session_state["hok_rule_area_input"] = current_hok_rule
 
-        hok_input_text = st.text_area(
-            "北海道・洋芝専用ルールテキスト（直接編集可能）",
-            height=300,
-            key="hok_rule_area_input"
-        )
-
-        if st.button(
-            "💾 北海道・洋芝専用ルールとして更新・保存する",
-            use_container_width=True,
-            key="save_hok_btn_v5",
-        ):
+        hok_input_text = st.text_area("北海道・洋芝専用ルールテキスト（直接編集可能）", height=300, key="hok_rule_area_input")
+        if st.button("💾 北海道・洋芝専用ルールとして更新・保存する", use_container_width=True, key="save_hok_btn_v5"):
             if hok_input_text.strip():
                 save_rules_to_file(RULE_HOKKAIDO_FILE, hok_input_text)
-                st.toast("🎉 北海道・洋芝専用ルールを更新・保存しました！次回からも自動適用されます！")
+                st.toast("🎉 北海道・洋芝専用ルールを更新・保存しました！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    # 4. 2歳G1専用ルール
+    with sub_tab4:
+        st.markdown("#### 👶 2歳G1専用ルールのアップロード ＆ 保存")
+        current_2yo_g1_rule = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
+        col_2g1_1, col_2g1_2 = st.columns([2, 1])
+        with col_2g1_1:
+            up_2g1 = st.file_uploader("📂 2歳G1用ルールテキスト (.txt) を選択", type=["txt"], key="up_2g1_file_v5")
+            if up_2g1 is not None:
+                uploaded_2g1_text = up_2g1.read().decode("utf-8", errors="ignore")
+                if uploaded_2g1_text.strip() and uploaded_2g1_text != st.session_state.get("last_up_2g1_text"):
+                    save_rules_to_file(RULE_2YO_G1_FILE, uploaded_2g1_text)
+                    st.session_state["2g1_rule_area_input"] = uploaded_2g1_text
+                    st.session_state["last_up_2g1_text"] = uploaded_2g1_text
+                    st.toast("🎉 アップロードした2歳G1ルールを自動読み込み＆保存しました！")
+                    st.rerun()
+        with col_2g1_2:
+            st.write("")
+            if st.button("🔄 2歳G1初期ルールに戻す", key="btn_2g1_def_v5", use_container_width=True):
+                save_rules_to_file(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
+                st.session_state["2g1_rule_area_input"] = DEFAULT_2YO_G1_RULES
+                st.session_state.pop("last_up_2g1_text", None)
+                st.toast("🔄 2歳G1初期ルールにリセットしました！")
+                st.rerun()
+
+        if "2g1_rule_area_input" not in st.session_state:
+            st.session_state["2g1_rule_area_input"] = current_2yo_g1_rule
+
+        two_g1_input_text = st.text_area("2歳G1専用ルールテキスト（直接編集可能）", height=300, key="2g1_rule_area_input")
+        if st.button("💾 2歳G1専用ルールとして更新・保存する", use_container_width=True, key="save_2g1_btn_v5"):
+            if two_g1_input_text.strip():
+                save_rules_to_file(RULE_2YO_G1_FILE, two_g1_input_text)
+                st.toast("🎉 2歳G1専用ルールを更新・保存しました！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    # 5. 2歳G2・G3専用ルール
+    with sub_tab5:
+        st.markdown("#### 👶 2歳G2・G3専用ルールのアップロード ＆ 保存")
+        current_2yo_gen_rule = load_saved_rules(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
+        col_2gen_1, col_2gen_2 = st.columns([2, 1])
+        with col_2gen_1:
+            up_2gen = st.file_uploader("📂 2歳G2・G3用ルールテキスト (.txt) を選択", type=["txt"], key="up_2gen_file_v5")
+            if up_2gen is not None:
+                uploaded_2gen_text = up_2gen.read().decode("utf-8", errors="ignore")
+                if uploaded_2gen_text.strip() and uploaded_2gen_text != st.session_state.get("last_up_2gen_text"):
+                    save_rules_to_file(RULE_2YO_GEN_FILE, uploaded_2gen_text)
+                    st.session_state["2gen_rule_area_input"] = uploaded_2gen_text
+                    st.session_state["last_up_2gen_text"] = uploaded_2gen_text
+                    st.toast("🎉 アップロードした2歳G2・G3ルールを自動読み込み＆保存しました！")
+                    st.rerun()
+        with col_2gen_2:
+            st.write("")
+            if st.button("🔄 2歳G2・G3初期ルールに戻す", key="btn_2gen_def_v5", use_container_width=True):
+                save_rules_to_file(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
+                st.session_state["2gen_rule_area_input"] = DEFAULT_2YO_GEN_RULES
+                st.session_state.pop("last_up_2gen_text", None)
+                st.toast("🔄 2歳G2・G3初期ルールにリセットしました！")
+                st.rerun()
+
+        if "2gen_rule_area_input" not in st.session_state:
+            st.session_state["2gen_rule_area_input"] = current_2yo_gen_rule
+
+        two_gen_input_text = st.text_area("2歳G2・G3専用ルールテキスト（直接編集可能）", height=300, key="2gen_rule_area_input")
+        if st.button("💾 2歳G2・G3専用ルールとして更新・保存する", use_container_width=True, key="save_2gen_btn_v5"):
+            if two_gen_input_text.strip():
+                save_rules_to_file(RULE_2YO_GEN_FILE, two_gen_input_text)
+                st.toast("🎉 2歳G2・G3専用ルールを更新・保存しました！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    # 6. 3歳G1専用ルール
+    with sub_tab6:
+        st.markdown("#### 🐴 3歳G1専用ルールのアップロード ＆ 保存")
+        current_3yo_g1_rule = load_saved_rules(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
+        col_3g1_1, col_3g1_2 = st.columns([2, 1])
+        with col_3g1_1:
+            up_3g1 = st.file_uploader("📂 3歳G1用ルールテキスト (.txt) を選択", type=["txt"], key="up_3g1_file_v5")
+            if up_3g1 is not None:
+                uploaded_3g1_text = up_3g1.read().decode("utf-8", errors="ignore")
+                if uploaded_3g1_text.strip() and uploaded_3g1_text != st.session_state.get("last_up_3g1_text"):
+                    save_rules_to_file(RULE_3YO_G1_FILE, uploaded_3g1_text)
+                    st.session_state["3g1_rule_area_input"] = uploaded_3g1_text
+                    st.session_state["last_up_3g1_text"] = uploaded_3g1_text
+                    st.toast("🎉 アップロードした3歳G1ルールを自動読み込み＆保存しました！")
+                    st.rerun()
+        with col_3g1_2:
+            st.write("")
+            if st.button("🔄 3歳G1初期ルールに戻す", key="btn_3g1_def_v5", use_container_width=True):
+                save_rules_to_file(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
+                st.session_state["3g1_rule_area_input"] = DEFAULT_3YO_G1_RULES
+                st.session_state.pop("last_up_3g1_text", None)
+                st.toast("🔄 3歳G1初期ルールにリセットしました！")
+                st.rerun()
+
+        if "3g1_rule_area_input" not in st.session_state:
+            st.session_state["3g1_rule_area_input"] = current_3yo_g1_rule
+
+        three_g1_input_text = st.text_area("3歳G1専用ルールテキスト（直接編集可能）", height=300, key="3g1_rule_area_input")
+        if st.button("💾 3歳G1専用ルールとして更新・保存する", use_container_width=True, key="save_3g1_btn_v5"):
+            if three_g1_input_text.strip():
+                save_rules_to_file(RULE_3YO_G1_FILE, three_g1_input_text)
+                st.toast("🎉 3歳G1専用ルールを更新・保存しました！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
+    # 7. 3歳G2・G3専用ルール
+    with sub_tab7:
+        st.markdown("#### 🐴 3歳G2・G3専用ルールのアップロード ＆ 保存")
+        current_3yo_gen_rule = load_saved_rules(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
+        col_3gen_1, col_3gen_2 = st.columns([2, 1])
+        with col_3gen_1:
+            up_3gen = st.file_uploader("📂 3歳G2・G3用ルールテキスト (.txt) を選択", type=["txt"], key="up_3gen_file_v5")
+            if up_3gen is not None:
+                uploaded_3gen_text = up_3gen.read().decode("utf-8", errors="ignore")
+                if uploaded_3gen_text.strip() and uploaded_3gen_text != st.session_state.get("last_up_3gen_text"):
+                    save_rules_to_file(RULE_3YO_GEN_FILE, uploaded_3gen_text)
+                    st.session_state["3gen_rule_area_input"] = uploaded_3gen_text
+                    st.session_state["last_up_3gen_text"] = uploaded_3gen_text
+                    st.toast("🎉 アップロードした3歳G2・G3ルールを自動読み込み＆保存しました！")
+                    st.rerun()
+        with col_3gen_2:
+            st.write("")
+            if st.button("🔄 3歳G2・G3初期ルールに戻す", key="btn_3gen_def_v5", use_container_width=True):
+                save_rules_to_file(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
+                st.session_state["3gen_rule_area_input"] = DEFAULT_3YO_GEN_RULES
+                st.session_state.pop("last_up_3gen_text", None)
+                st.toast("🔄 3歳G2・G3初期ルールにリセットしました！")
+                st.rerun()
+
+        if "3gen_rule_area_input" not in st.session_state:
+            st.session_state["3gen_rule_area_input"] = current_3yo_gen_rule
+
+        three_gen_input_text = st.text_area("3歳G2・G3専用ルールテキスト（直接編集可能）", height=300, key="3gen_rule_area_input")
+        if st.button("💾 3歳G2・G3専用ルールとして更新・保存する", use_container_width=True, key="save_3gen_btn_v5"):
+            if three_gen_input_text.strip():
+                save_rules_to_file(RULE_3YO_GEN_FILE, three_gen_input_text)
+                st.toast("🎉 3歳G2・G3専用ルールを更新・保存しました！")
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
@@ -3373,7 +3567,6 @@ elif selected_menu == "🔄 回顧・精度検証":
     if db_df.empty:
         st.info("💡 過去馬データベースに予想データがありません。「📋 レース分析・予想」で解析を実行してください！")
     else:
-        # 確定着順・回顧メモが未入力の「評価出し済み・未回顧レース」のみを厳格抽出
         unrecap_races = []
         for r in db_df["レース名"].dropna().unique():
             r_str = str(r).strip()
@@ -3679,7 +3872,6 @@ elif selected_menu == "📊 評価データ一覧（プール）":
         if selected_eval_race and selected_eval_race != "--- 🎯 レースを選択してください ---":
             matched_df = db_df[db_df["レース名"].astype(str) == str(selected_eval_race)].copy()
             if not matched_df.empty:
-                # 総合スコア降順（S→C, 高得点→低得点）に確実にソート
                 if "総合スコア" in matched_df.columns:
                     matched_df["_sort_score"] = pd.to_numeric(
                         matched_df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
@@ -3692,7 +3884,6 @@ elif selected_menu == "📊 評価データ一覧（プール）":
                 st.error(f"⚠️ 選択されたレース「{selected_eval_race}」のデータが見つかりませんでした。")
         else:
             st.info("👆 上のドロップダウンから閲覧・表示したいレースを選択してください。")
-
 
 # --------------------------------------------------
 # 📝 6. 回顧・精度検証一覧（プール） メニュー
@@ -3741,7 +3932,6 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
         if selected_recap_race and selected_recap_race != "--- 🎯 レースを選択してください ---":
             race_df = db_df[db_df["レース名"].astype(str) == str(selected_recap_race)].copy()
 
-            # 総合スコア降順（S→C, 高得点→低得点）に確実にソート
             if "総合スコア" in race_df.columns:
                 race_df["_sort_score"] = pd.to_numeric(
                     race_df["総合スコア"].astype(str).str.replace("点", "").str.strip(),
@@ -3893,7 +4083,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             "メモ": st.column_config.TextColumn("メモ（詳細分析）", width="large"),
         }
 
-        # 表示のカラム定義（「年」を最右端にして余計な重複カラムは100%カット）
         clean_strict_cols = [
             c for c in [
                 "確定着順", "レース名", "馬番", "馬名", "予想人気", "総合スコア", "評価",
@@ -3904,7 +4093,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
             ] if c in disp_db_df.columns
         ]
 
-        # 1. 特定レース選択時
         if selected_db_race != "🌐 すべてのレース（全件一括表示）":
             filtered_df = disp_db_df[disp_db_df["レース名"].astype(str) == str(selected_db_race)].copy()
             
@@ -3950,7 +4138,6 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                     use_container_width=True,
                 )
 
-        # 2. 🌐 すべてのレース（全件一括表示）
         else:
             st.markdown("### 🌐 プール済み全レース・全頭一覧")
             
