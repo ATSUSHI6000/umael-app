@@ -1183,6 +1183,10 @@ def update_db_with_recap(race_name, result_df, memo_text):
         if not mask.any():
             return
 
+        # AIからの結果テーブルのカラム名を事前正規化
+        if not result_df.empty:
+            result_df = sanitize_dataframe_columns(result_df)
+
         result_by_num = {}
         if not result_df.empty and "馬番" in result_df.columns:
             for _, result_row in result_df.iterrows():
@@ -1202,19 +1206,32 @@ def update_db_with_recap(race_name, result_df, memo_text):
             horse_num = normalize_horse_num(df.at[idx, "馬番"] if "馬番" in df.columns else "")
             result_row = result_by_num.get(horse_num)
             if result_row is not None:
+                # 1. 単勝人気の表記ゆれ対応
                 pop_val = result_row.get("単勝人気", result_row.get("人気", ""))
                 if pd.notna(pop_val) and str(pop_val).strip():
                     df.at[idx, "単勝人気"] = str(pop_val).strip()
+
+                # 2. 確定着順の表記ゆれ（確定着順 / 着順 / 順位 / 着）を完全網羅
+                rank_val = ""
+                for rank_key in ["確定着順", "着順", "順位", "着"]:
+                    if rank_key in result_row and pd.notna(result_row.get(rank_key)) and str(result_row.get(rank_key)).strip():
+                        rank_val = str(result_row.get(rank_key)).strip()
+                        break
+                if rank_val:
+                    df.at[idx, "確定着順"] = rank_val
+
+                # 3. その他の項目を書き込み
                 for col in result_columns:
-                    if col in result_df.columns and col != "単勝人気":
-                        value = result_row.get(col, "")
-                        if pd.notna(value) and str(value).strip():
-                            df.at[idx, col] = str(value).strip()
+                    if col not in ["単勝人気", "確定着順"]:
+                        if col in result_row and pd.notna(result_row.get(col)) and str(result_row.get(col)).strip():
+                            df.at[idx, col] = str(result_row.get(col)).strip()
+
             df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
         df = sanitize_dataframe_columns(df)
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
+        # 年度別ファイルも同期保存
         year_val = extract_year_from_race_name(race_name)
         if "年" in df.columns and mask.any():
             saved_year = str(df.loc[mask, "年"].iloc[0]).strip()
@@ -1226,6 +1243,12 @@ def update_db_with_recap(race_name, result_df, memo_text):
         year_df = df[df["年"].astype(str) == str(year_val)].copy() if "年" in df.columns else df.copy()
         year_df = year_df[[col for col in year_df.columns if col != "年"] + (["年"] if "年" in year_df.columns else [])]
         year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
+
+        # スプレッドシート同期
+        try:
+            save_db_to_sheet(df)
+        except Exception:
+            pass
 
     except Exception as e:
         st.warning(f"⚠️ データベースの回顧・着順プール保存中に注意: {e}")
@@ -2853,14 +2876,15 @@ st.markdown("""
 
 
 # --------------------------------------------------
-# 🧭 URLパラメーター共有ロジック（CSSの後に読み込み＆赤線消去）
+# 🧭 URLパラメーター共有ロジック（予想共有 ＆ 回顧共有）
 # --------------------------------------------------
 
 query_params = st.query_params
 mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
-if mode_param == "share" and race_param:
+# 共通スタイルの適用（共有画面ではヘッダーやサイドバーを非表示）
+if mode_param in ["share", "share_recap"] and race_param:
     st.markdown("""
     <style>
         [data-testid="stSidebar"] { display: none !important; }
@@ -2871,46 +2895,121 @@ if mode_param == "share" and race_param:
     """, unsafe_allow_html=True)
 
     db_df = load_db(selected_year="全期間")
-    if not db_df.empty and "レース名" in db_df.columns:
-        matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
-        if not matched_df.empty:
-            share_race_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(race_param)).strip("_")[:80] or "race"
-            share_view_key = f"shared_view_mode_{share_race_key}"
-            share_summary_choice = "🌟 推奨評価上位サマリー"
-            share_detail_choice = "📊 詳細全データ表（評価順）"
+    
+    # ----------------------------------------
+    # 📝 1. 回顧専用の共有画面 (mode=share_recap)
+    # ----------------------------------------
+    if mode_param == "share_recap":
+        if not db_df.empty and "レース名" in db_df.columns:
+            matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)].copy()
+            if not matched_df.empty:
+                st.markdown(f"<h2 style='text-align: center; color: #10b981;'>📝 【{race_param}】 レース後回顧・結果レポート</h2>", unsafe_allow_html=True)
+                st.divider()
 
-            if share_view_key not in st.session_state:
-                requested_view = str(st.query_params.get("view", "summary")).strip().lower()
-                st.session_state[share_view_key] = (
-                    share_detail_choice if requested_view == "detail" else share_summary_choice
+                # 着順テーブルの準備
+                target_cols = [
+                    c for c in [
+                        "確定着順", "馬番", "馬名", "総合スコア", "評価", "予想人気",
+                        "単勝人気", "確定オッズ", "タイム", "上り3F", "勝因・敗因ショートメモ"
+                    ] if c in matched_df.columns
+                ]
+                disp_result_df = matched_df[target_cols].copy()
+
+                def highlight_ranks_share(row):
+                    rank_val = normalize_rank(row.get("確定着順", ""))
+                    if rank_val == "1":
+                        return ["background-color: #4a3b00; color: #ffd700; font-weight: bold;"] * len(row)
+                    elif rank_val == "2":
+                        return ["background-color: #223344; color: #00ffff; font-weight: bold;"] * len(row)
+                    elif rank_val == "3":
+                        return ["background-color: #332211; color: #ffaa55; font-weight: bold;"] * len(row)
+                    return [""] * len(row)
+
+                st.markdown("### 🏆 確定着順 ＆ 予想照合結果")
+                calc_height = min(500, (len(disp_result_df) + 1) * 35 + 38)
+                st.dataframe(
+                    disp_result_df.style.apply(highlight_ranks_share, axis=1),
+                    column_config={
+                        "総合スコア": st.column_config.ProgressColumn(
+                            "総合スコア", format="%d点", min_value=0, max_value=100, color="#0bce0e"
+                        ),
+                    },
+                    use_container_width=True,
+                    height=calc_height,
+                    hide_index=True,
                 )
 
-            def _update_share_view_query():
-                current_view = st.session_state.get(share_view_key, share_summary_choice)
-                st.query_params["view"] = "detail" if current_view == share_detail_choice else "summary"
+                st.divider()
 
-            st.markdown("#### 📊 表示内容を切り替え")
-            share_view_mode = st.radio(
-                "表示切替",
-                [share_summary_choice, share_detail_choice],
-                horizontal=True,
-                key=share_view_key,
-                on_change=_update_share_view_query,
-                label_visibility="collapsed",
-            )
-            st.divider()
-            render_race_evaluation_view(
-                matched_df,
-                is_viewer_mode=True,
-                show_chat=False,
-                view_mode_override=share_view_mode,
-            )
+                # 回顧メモ（ルール改訂部分は元々 DB に保存されていないため安心！）
+                recap_text = ""
+                if "回顧メモ" in matched_df.columns:
+                    recap_memos = matched_df["回顧メモ"].dropna().unique()
+                    non_empty = [m for m in recap_memos if str(m).strip()]
+                    if non_empty:
+                        recap_text = str(non_empty[0]).strip()
+
+                st.markdown("### 📝 詳細レース回顧・プロの見解レポート")
+                if recap_text:
+                    st.markdown(
+                        f"""
+                        <div class="recap-box">
+{recap_text}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("ℹ️ このレースの回顧レポートはまだ登録されていません。")
+            else:
+                st.error(f"⚠️ レース「{race_param}」の回顧データは見つかりませんでした。")
         else:
-            st.error(f"⚠️ レース「{race_param}」の解析データは見つかりませんでした。")
-    else:
-        st.error("⚠️ データベースに予想データが登録されていません。")
+            st.error("⚠️ データベースにデータが登録されていません。")
+        st.stop()
 
-    st.stop()
+    # ----------------------------------------
+    # 🌟 2. 予想データの共有画面 (mode=share)
+    # ----------------------------------------
+    elif mode_param == "share":
+        if not db_df.empty and "レース名" in db_df.columns:
+            matched_df = db_df[db_df["レース名"].astype(str) == str(race_param)]
+            if not matched_df.empty:
+                share_race_key = re.sub(r"[^A-Za-z0-9_-]+", "_", str(race_param)).strip("_")[:80] or "race"
+                share_view_key = f"shared_view_mode_{share_race_key}"
+                share_summary_choice = "🌟 推奨評価上位サマリー"
+                share_detail_choice = "📊 詳細全データ表（評価順）"
+
+                if share_view_key not in st.session_state:
+                    requested_view = str(st.query_params.get("view", "summary")).strip().lower()
+                    st.session_state[share_view_key] = (
+                        share_detail_choice if requested_view == "detail" else share_summary_choice
+                    )
+
+                def _update_share_view_query():
+                    current_view = st.session_state.get(share_view_key, share_summary_choice)
+                    st.query_params["view"] = "detail" if current_view == share_detail_choice else "summary"
+
+                st.markdown("#### 📊 表示内容を切り替え")
+                share_view_mode = st.radio(
+                    "表示切替",
+                    [share_summary_choice, share_detail_choice],
+                    horizontal=True,
+                    key=share_view_key,
+                    on_change=_update_share_view_query,
+                    label_visibility="collapsed",
+                )
+                st.divider()
+                render_race_evaluation_view(
+                    matched_df,
+                    is_viewer_mode=True,
+                    show_chat=False,
+                    view_mode_override=share_view_mode,
+                )
+            else:
+                st.error(f"⚠️ レース「{race_param}」の解析データは見つかりませんでした。")
+        else:
+            st.error("⚠️ データベースに予想データが登録されていません。")
+        st.stop()
 
 
 # --------------------------------------------------
