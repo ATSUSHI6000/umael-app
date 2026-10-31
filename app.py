@@ -3907,21 +3907,47 @@ elif selected_menu == "🔄 回顧・精度検証":
                             ]
                             predict_summary = target_df[cols].to_string(index=False)
 
-                            is_g1_race = "G1" in selected_race or "Ｇ１" in selected_race or "Jpn1" in selected_race or "Ｊｐｎ１" in selected_race
-                            is_hok_race = any(
-                                k in selected_race for k in ["函館", "札幌", "洋芝"]
-                            )
+                            # --- 🎯 全7パターン ルール自動判別 ＆ 優先適用ロジック ---
+                            saved_rule_name = ""
+                            if "評価ルール" in target_df.columns and not target_df.empty:
+                                saved_rule_name = str(target_df["評価ルール"].iloc[0]).strip()
 
-                            if is_g1_race:
+                            race_str = f"{selected_race} {saved_rule_name}"
+                            
+                            is_g1 = any(k in race_str for k in ["G1", "Ｇ１", "Jpn1", "Ｊｐｎ１"])
+                            is_2yo = any(k in race_str for k in ["2歳", "2才", "２歳", "２才"])
+                            is_3yo = any(k in race_str for k in ["3歳", "3才", "３歳", "３才"])
+                            is_hok = any(k in race_str for k in ["函館", "札幌", "洋芝", "北海道"])
+
+                            # 1. 2歳G1
+                            if is_2yo and is_g1:
+                                rule_file = globals().get("RULE_2YO_G1_FILE", "rule_2yo_g1.txt")
+                                def_rule = globals().get("DEFAULT_2YO_G1_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
+                            # 2. 2歳G2・G3
+                            elif is_2yo:
+                                rule_file = globals().get("RULE_2YO_G2G3_FILE", globals().get("RULE_2YO_FILE", "rule_2yo_g2g3.txt"))
+                                def_rule = globals().get("DEFAULT_2YO_G2G3_RULES", globals().get("DEFAULT_2YO_RULES", ""))
+                                current_rule = load_saved_rules(rule_file, def_rule)
+                            # 3. 3歳G1
+                            elif is_3yo and is_g1:
+                                rule_file = globals().get("RULE_3YO_G1_FILE", "rule_3yo_g1.txt")
+                                def_rule = globals().get("DEFAULT_3YO_G1_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
+                            # 4. 3歳G2・G3
+                            elif is_3yo:
+                                rule_file = globals().get("RULE_3YO_G2G3_FILE", globals().get("RULE_3YO_FILE", "rule_3yo_g2g3.txt"))
+                                def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", globals().get("DEFAULT_3YO_RULES", ""))
+                                current_rule = load_saved_rules(rule_file, def_rule)
+                            # 5. G1専用（古馬/混合）
+                            elif is_g1:
                                 current_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-                            elif is_hok_race:
-                                current_rule = load_saved_rules(
-                                    RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES
-                                )
+                            # 6. 北海道・洋芝専用
+                            elif is_hok:
+                                current_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+                            # 7. 平場・G2・G3（古馬/混合）
                             else:
-                                current_rule = load_saved_rules(
-                                    RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES
-                                )
+                                current_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
 
                             prompt = (
                                 "あなたは競馬予想プロフェッショナル「AI」です。\n"
