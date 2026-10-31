@@ -1011,6 +1011,7 @@ def load_db_from_sheet():
 import traceback
 
 def save_db_to_sheet(df):
+    """結果・回顧取り込み時のみ実行される安全版スプレッドシート同期処理"""
     gc = get_gspread_client()
     if not gc:
         st.error("⚠️ Googleスプレッドシートへの接続認証（gspread）に失敗しました。Secretsの設定を確認してください。")
@@ -1023,6 +1024,7 @@ def save_db_to_sheet(df):
         sh = gc.open_by_key(SPREADSHEET_ID)
         worksheet = sh.worksheet("重賞レース分析")
         
+        # 1. 改行や特殊文字によるAPIエラーを防止
         clean_df = sanitize_dataframe_columns(df)
         clean_df = clean_df.fillna("").astype(str)
         for col in clean_df.columns:
@@ -1030,6 +1032,7 @@ def save_db_to_sheet(df):
             
         all_values = worksheet.get_all_values()
         
+        # 2. シートが空の場合はヘッダー付きで新規書き込み
         if not all_values or len(all_values) <= 1:
             header = clean_df.columns.tolist()
             new_data = clean_df.values.tolist()
@@ -1037,6 +1040,7 @@ def save_db_to_sheet(df):
             st.toast("✅ 「重賞レース分析」シートへ全データを新規保存しました！")
             return
 
+        # 3. 既存データとマージ（取り込んだレース名のみ上書き更新）
         existing_df = pd.DataFrame(all_values[1:], columns=all_values[0])
         incoming_races = clean_df["レース名"].dropna().unique().tolist()
         
@@ -1046,13 +1050,16 @@ def save_db_to_sheet(df):
             filtered_df = existing_df
         
         updated_df = pd.concat([filtered_df, clean_df], ignore_index=True)
-        
-        worksheet.clear()
         updated_values = [updated_df.columns.tolist()] + updated_df.values.tolist()
-        worksheet.update('A1', updated_values)
         
-        races_str = ", ".join(incoming_races)
-        st.toast(f"✅ 【重複防止・上書き完了】 '{races_str}' のデータを保存しました！")
+        # 🛡️ 安全ガード: 書き込み用データが正しく準備できた場合のみ clear & update を実行
+        if len(updated_values) > 1:
+            worksheet.clear()
+            worksheet.update('A1', updated_values)
+            races_str = ", ".join(incoming_races)
+            st.toast(f"✅ 【スプシ同期完了】 '{races_str}' の結果・回顧データを保存しました！")
+        else:
+            st.error("⚠️ 更新データの作成に失敗したため、スプレッドシート保護のため同期を中断しました。")
 
     except Exception as e:
         st.error(f"❌ スプレッドシート同期エラーが発生しました！")
@@ -1161,13 +1168,13 @@ def save_to_db(new_df):
     
     combined_root.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-    try:
-        save_db_to_sheet(combined_root)
-    except Exception:
-        pass
+    # 💡 予想評価時はスプシへ自動更新しないよう無効化（結果取り込み時のみ同期）
+    # try:
+    #     save_db_to_sheet(combined_root)
+    # except Exception:
+    #     pass
 
     return load_db(selected_year="全期間")
-
 
 def update_db_with_recap(race_name, result_df, memo_text):
     if not os.path.exists(DB_FILE):
