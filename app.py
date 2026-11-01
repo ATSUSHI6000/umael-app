@@ -3852,7 +3852,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                     default_idx = unrecap_races.index(latest_race)
 
             selected_race = st.selectbox(
-                "🎯 回顧対象のレースを選択してください（※未回顧のレースのみ表示）",
+                "🎯 回顧対象のレースを選択してください（※未未回顧のレースのみ表示）",
                 unrecap_races,
                 index=default_idx
             )
@@ -3907,10 +3907,10 @@ elif selected_menu == "🔄 回顧・精度検証":
                             ]
                             predict_summary = target_df[cols].to_string(index=False)
 
-                            # --- 🎯 予想時ルール完全自動引き継ぎ ＆ 全7パターン多角判定ロジック ---
+                            # --- 🎯 DB保存ルール絶対最優先 ＆ 年齢混同完全遮断ルーティング ---
                             import re
 
-                            # 1. DB保存のルール名を取得（表記揺れ：ドット . を 中黒 ・ に標準化）
+                            # 1. DB保存のルール名を取得（ドット・全角半角の標準化）
                             saved_rule_name = ""
                             if "評価ルール" in target_df.columns and not target_df.empty:
                                 valid_rules = target_df["評価ルール"].dropna().astype(str).str.strip()
@@ -3918,55 +3918,62 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 if not valid_rules.empty:
                                     saved_rule_name = valid_rules.iloc[0]
 
-                            # 2. 判定用テキストの生成（ドット・全角半角の統一）
                             s_rule_clean = saved_rule_name.lower().replace(".", "・").replace("．", "・")
                             r_name_clean = str(selected_race).lower().replace(".", "・").replace("．", "・")
                             target_all_text = " ".join(target_df.astype(str).values.flatten()).replace(".", "・").replace("．", "・") + " " + r_name_clean + " " + s_rule_clean
 
-                            # 3. 古馬・混合戦フラグ（「3歳以上」「4歳以上」「古馬」「牡4」等）
-                            has_older_condition = bool(re.search(r'(3歳以上|３歳以上|4歳以上|４歳以上|古馬)', target_all_text))
-                            has_older_horse = bool(re.search(r'(牡[4-9]|牝[4-9]|セ[4-9]|牡[４-９]|牝[４-９]|セ[４-９]|[4-9]歳|[４-９]歳)', target_all_text))
-                            is_mixed_or_older = has_older_condition or has_older_horse
-
-                            # 4. キーワード＆条件判定
+                            # フラグ定義
+                            is_2yo_tag = ("2歳" in s_rule_clean or "2才" in s_rule_clean)
+                            is_3yo_tag = ("3歳" in s_rule_clean or "3才" in s_rule_clean)
                             is_g1_kw = any(k in target_all_text for k in ["g1", "ｇ１", "jpn1", "ｊｐｎ１"])
                             is_hok_kw = any(k in target_all_text for k in ["函館", "札幌", "洋芝", "北海道"])
 
-                            is_2yo_in_text = bool(re.search(r'(2歳|2才|２歳|２才|牡2|牝2|セ2|牡２|牝２|セ２)', target_all_text))
-                            is_2yo = ("2歳" in s_rule_clean or "2才" in s_rule_clean) or (is_2yo_in_text and not is_mixed_or_older) or any(k in target_all_text for k in ["2歳", "2才", "２歳", "２才", "2yo", "ジュニア", "阪神jf", "朝日杯", "ホープフル", "サウジアラビア", "アルテミス", "ファンタジー", "新潟2歳", "札幌2歳", "小倉2歳", "函館2歳", "京都2歳", "東スポ杯"])
+                            # 古馬G1レース名キーワード（天皇賞秋やジャパンC等で3歳馬が出走しても古馬G1に固定する）
+                            senior_g1_names = ["天皇賞", "ジャパンカップ", "ジャパンｃ", "有馬記念", "宝塚記念", "安田記念", "マイルｃｓ", "マイルチャンピオン", "エリザベス", "ヴィクトリア", "フェブラリー", "高松宮", "スプリンターズ", "大阪杯", "チャンピオンズ"]
+                            is_senior_g1_name = any(k in r_name_clean for k in senior_g1_names)
 
-                            is_3yo_in_text = bool(re.search(r'(3歳|3才|３歳|３才|牡3|牝3|セ3|牡３|牝３|セ３)', target_all_text))
-                            is_3yo = ("3歳" in s_rule_clean or "3才" in s_rule_clean) or (is_3yo_in_text and not is_mixed_or_older and not is_2yo) or any(k in target_all_text for k in ["3歳", "3才", "３歳", "３才", "3yo", "クラシック", "皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞", "きさらぎ", "共同通信", "弥生", "スプリング", "若駒", "フローラ", "青葉", "プリンシパル", "葵", "紫苑", "ローズ", "神戸新聞", "セントライト", "ファルコン", "チューリップ", "フィリーズ", "フラワー", "毎日杯", "アーリントン", "ニュージーランド", "ユニコーン", "レパード", "ラジオnikkei"])
-
-                            # 5. 優先順位に従って対応するルールテキストを読み込み
-                            if (is_2yo and is_g1_kw) or ("2歳" in s_rule_clean and "g1" in s_rule_clean):
-                                rule_file = globals().get("RULE_2YO_G1_FILE", globals().get("RULE_2AGE_G1_FILE", "rule_2yo_g1.txt"))
+                            # --- 【優先度順判定】 ---
+                            # ① 2歳 G1
+                            if (is_2yo_tag and is_g1_kw) or ("2歳" in s_rule_clean and "g1" in s_rule_clean):
+                                rule_file = globals().get("RULE_2YO_G1_FILE", "rule_2yo_g1.txt")
                                 def_rule = globals().get("DEFAULT_2YO_G1_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            elif is_2yo or ("2歳" in s_rule_clean or "2才" in s_rule_clean):
-                                rule_file = globals().get("RULE_2YO_G2G3_FILE", globals().get("RULE_2YO_FILE", globals().get("RULE_2AGE_G2G3_FILE", "rule_2yo_g2g3.txt")))
-                                def_rule = globals().get("DEFAULT_2YO_G2G3_RULES", globals().get("DEFAULT_2YO_RULES", ""))
+                            # ② 2歳 G2・G3
+                            elif is_2yo_tag:
+                                rule_file = globals().get("RULE_2YO_G2G3_FILE", "rule_2yo_g2g3.txt")
+                                def_rule = globals().get("DEFAULT_2YO_G2G3_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            elif (is_3yo and is_g1_kw) or ("3歳" in s_rule_clean and "g1" in s_rule_clean):
-                                rule_file = globals().get("RULE_3YO_G1_FILE", globals().get("RULE_3AGE_G1_FILE", "rule_3yo_g1.txt"))
+                            # ③ 3歳 G1（DBに明確に「3歳」と書かれているか、レース名が3歳限定G1の場合のみ！）
+                            elif (is_3yo_tag and is_g1_kw) or (any(k in r_name_clean for k in ["皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞", "羽田盃", "東京ダービー", "ジャパンダートクラシック"])):
+                                rule_file = globals().get("RULE_3YO_G1_FILE", "rule_3yo_g1.txt")
                                 def_rule = globals().get("DEFAULT_3YO_G1_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            elif is_3yo or ("3歳" in s_rule_clean or "3才" in s_rule_clean):
-                                rule_file = globals().get("RULE_3YO_G2G3_FILE", globals().get("RULE_3YO_FILE", globals().get("RULE_3AGE_G2G3_FILE", "rule_3yo_g3_rules.txt")))
-                                def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", globals().get("DEFAULT_3YO_RULES", ""))
+                            # ④ 3歳 G2・G3
+                            elif is_3yo_tag:
+                                rule_file = globals().get("RULE_3YO_G2G3_FILE", "rule_3yo_g2g3.txt")
+                                def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            elif "g1" in s_rule_clean or is_g1_kw:
-                                current_rule = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
+                            # ⑤ G1専用（古馬/混合G1）★ DBルール名に「g1」が含まれるか、古馬G1レース名の場合！
+                            elif ("g1" in s_rule_clean and not is_2yo_tag and not is_3yo_tag) or is_senior_g1_name or (is_g1_kw and not is_2yo_tag and not is_3yo_tag):
+                                rule_file = globals().get("RULE_G1_FILE", "rule_g1.txt")
+                                def_rule = globals().get("DEFAULT_G1_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
 
+                            # ⑥ 北海道・洋芝専用
                             elif "北海道" in s_rule_clean or "洋芝" in s_rule_clean or is_hok_kw:
-                                current_rule = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
+                                rule_file = globals().get("RULE_HOKKAIDO_FILE", "rule_hokkaido.txt")
+                                def_rule = globals().get("DEFAULT_HOKKAIDO_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
 
+                            # ⑦ 平場・G2・G3（古馬/混合）
                             else:
-                                current_rule = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
+                                rule_file = globals().get("RULE_GENERAL_FILE", "rule_general.txt")
+                                def_rule = globals().get("DEFAULT_GENERAL_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
 
                             prompt = (
                                 "あなたは競馬予想プロフェッショナル「AI」です。\n"
@@ -4000,7 +4007,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 "---FULL_MERGED_RULE---\n\n"
                                 "[ブロック2：バージョン繰り上げ済みのルール全文枠]\n"
                                 "【◯◯専用・評価表出力ルール（ver.8.X・...）】\n"
-                                "（※現在適用中のルールが持つ目次・章立て構造（例：■ 0. 〜 ■ 9. などのセクション枠組および各条項のインデント）を絶対に1文字も崩さず完全維持してください！箇条書きに要約したり、5項目などの簡易版にまとめ直すことは【厳重禁止】とします。ヘッダータイトルのバージョンをver.8.Xから更新後の新バージョンに変更し、本文内の更新日時も最新にし、補正・改修部分を正しい該当項目（■ 3、■ 4等）の内部に正しく差し込み・完全統合した状態の『最新ルール全文』を出力すること）\n"
+                                "（※【最重要命令】提供された『現在適用中の評価ルール』のヘッダータイトルカテゴリ（例：【G1専用ルール...】等）を絶対に維持してください！古馬G1の回顧であるにもかかわらず『3歳G1専用』や『2歳G1専用』など全く別の年齢カテゴリのルールタイトルへ勝手に書き換えることは【厳重禁止】とします。章立て構造（■ 0. 〜 ■ 9.）を1文字も崩さず完全維持し、バージョン番号を+0.1繰り上げ、該当項目へ補正を統合した完成版全文を出力してください）\n"
                             )
 
                             client = genai.Client(api_key=active_key)
