@@ -3855,41 +3855,23 @@ elif selected_menu == "🔄 回顧・精度検証":
     if db_df.empty:
         st.info("💡 過去馬データベースに予想データがありません。「📋 レース分析・予想」で解析を実行してください！")
     else:
-        unrecap_races = []
-        for r in db_df["レース名"].dropna().unique():
-            r_str = str(r).strip()
-            if not r_str:
-                continue
-            sub_df = db_df[db_df["レース名"].astype(str).str.strip() == r_str]
-            
-            has_rank = False
-            if "確定着順" in sub_df.columns:
-                has_rank = sub_df["確定着順"].astype(str).str.strip().replace(["nan", "None", "NaN"], "").any()
-            
-            has_memo = False
-            if "回顧メモ" in sub_df.columns:
-                has_memo = sub_df["回顧メモ"].astype(str).str.strip().replace(["nan", "None", "NaN"], "").any()
+        # DBに登録されている全レースリストを取得
+        all_races = [str(r).strip() for r in db_df["レース名"].dropna().unique() if str(r).strip()]
 
-            if not (has_rank or has_memo):
-                unrecap_races.append(r_str)
-
-        if not unrecap_races:
-            st.success("🎉 現在、未回顧の予想レースはありません（すべての予想レースの回顧・照合が完了しています）！")
-            st.info("💡 過去の回顧結果を閲覧する場合は「📝 回顧・精度検証一覧（プール）」メニューをご確認ください。")
+        if not all_races:
+            st.info("💡 対象となる予想データが存在しません。")
         else:
-            all_races = list(db_df["レース名"].dropna().unique())
             default_idx = 0
             if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
                 latest_race = str(st.session_state["analyzed_df"]["レース名"].iloc[0]).strip()
                 if latest_race in all_races:
                     default_idx = all_races.index(latest_race)
 
-            all_races = list(db_df["レース名"].dropna().unique())
             selected_race = st.selectbox(
-            "🎯 回顧対象のレースを選択してください（※再回顧・データ上書きも可能）",
-            all_races,
-            index=0
-        )
+                "🎯 回顧対象のレースを選択してください（※再回顧・データ上書き更新も可能）",
+                all_races,
+                index=default_idx
+            )
 
             col_r1, col_r2 = st.columns(2)
             with col_r1:
@@ -3944,7 +3926,6 @@ elif selected_menu == "🔄 回顧・精度検証":
                             # --- 🎯 DB保存ルール絶対最優先 ＆ 年齢混同完全遮断ルーティング ---
                             import re
 
-                            # 1. DB保存のルール名を取得（ドット・全角半角の標準化）
                             saved_rule_name = ""
                             if "評価ルール" in target_df.columns and not target_df.empty:
                                 valid_rules = target_df["評価ルール"].dropna().astype(str).str.strip()
@@ -3956,54 +3937,45 @@ elif selected_menu == "🔄 回顧・精度検証":
                             r_name_clean = str(selected_race).lower().replace(".", "・").replace("．", "・")
                             target_all_text = " ".join(target_df.astype(str).values.flatten()).replace(".", "・").replace("．", "・") + " " + r_name_clean + " " + s_rule_clean
 
-                            # フラグ定義
                             is_2yo_tag = ("2歳" in s_rule_clean or "2才" in s_rule_clean)
                             is_3yo_tag = ("3歳" in s_rule_clean or "3才" in s_rule_clean)
                             is_g1_kw = any(k in target_all_text for k in ["g1", "ｇ１", "jpn1", "ｊｐｎ１"])
                             is_hok_kw = any(k in target_all_text for k in ["函館", "札幌", "洋芝", "北海道"])
 
-                            # 古馬G1レース名キーワード（天皇賞秋やジャパンC等で3歳馬が出走しても古馬G1に固定する）
                             senior_g1_names = ["天皇賞", "ジャパンカップ", "ジャパンｃ", "有馬記念", "宝塚記念", "安田記念", "マイルｃｓ", "マイルチャンピオン", "エリザベス", "ヴィクトリア", "フェブラリー", "高松宮", "スプリンターズ", "大阪杯", "チャンピオンズ"]
                             is_senior_g1_name = any(k in r_name_clean for k in senior_g1_names)
 
-                            # --- 【優先度順判定】 ---
-                            # ① 2歳 G1
+                            # ルールファイルの選択
                             if (is_2yo_tag and is_g1_kw) or ("2歳" in s_rule_clean and "g1" in s_rule_clean):
                                 rule_file = globals().get("RULE_2YO_G1_FILE", "rule_2yo_g1.txt")
                                 def_rule = globals().get("DEFAULT_2YO_G1_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ② 2歳 G2・G3
                             elif is_2yo_tag:
                                 rule_file = globals().get("RULE_2YO_G2G3_FILE", "rule_2yo_g2g3.txt")
                                 def_rule = globals().get("DEFAULT_2YO_G2G3_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ③ 3歳 G1（DBに明確に「3歳」と書かれているか、レース名が3歳限定G1の場合のみ！）
                             elif (is_3yo_tag and is_g1_kw) or (any(k in r_name_clean for k in ["皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞", "羽田盃", "東京ダービー", "ジャパンダートクラシック"])):
                                 rule_file = globals().get("RULE_3YO_G1_FILE", "rule_3yo_g1.txt")
                                 def_rule = globals().get("DEFAULT_3YO_G1_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ④ 3歳 G2・G3
                             elif is_3yo_tag:
                                 rule_file = globals().get("RULE_3YO_G2G3_FILE", "rule_3yo_g2g3.txt")
                                 def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ⑤ G1専用（古馬/混合G1）★ DBルール名に「g1」が含まれるか、古馬G1レース名の場合！
                             elif ("g1" in s_rule_clean and not is_2yo_tag and not is_3yo_tag) or is_senior_g1_name or (is_g1_kw and not is_2yo_tag and not is_3yo_tag):
                                 rule_file = globals().get("RULE_G1_FILE", "rule_g1.txt")
                                 def_rule = globals().get("DEFAULT_G1_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ⑥ 北海道・洋芝専用
                             elif "北海道" in s_rule_clean or "洋芝" in s_rule_clean or is_hok_kw:
                                 rule_file = globals().get("RULE_HOKKAIDO_FILE", "rule_hokkaido.txt")
                                 def_rule = globals().get("DEFAULT_HOKKAIDO_RULES", "")
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
-                            # ⑦ 平場・G2・G3（古馬/混合）
                             else:
                                 rule_file = globals().get("RULE_GENERAL_FILE", "rule_general.txt")
                                 def_rule = globals().get("DEFAULT_GENERAL_RULES", "")
@@ -4016,9 +3988,10 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 f"【現在適用中の評価ルール】\n{current_rule}\n\n"
                                 f"【実際のレース結果データ（複数ソース統合版）】\n{raw_result}\n\n"
                                 "【出力フォーマット要求】\n"
-                                "1. まず、以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
+                                "1. 提供された結果データ・ファイルから【出走全頭分】の着順・オッズ・タイム・上り3Fを1頭も省略せず、必ず以下の全頭確定着順テーブルをTSV（タブ区切り）テキストのみで出力してください（コードブロック ```tsv は含めないこと）：\n\n"
                                 "確定着順\t馬番\t馬名\t単勝人気\t確定オッズ\tタイム\t上り3F\t評価\t勝因・敗因ショートメモ\n\n"
-                                "※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0（00000）は絶対に出力しないでください。\n\n"
+                                "※対象レースの全出走馬を1頭も漏らさず全件出力すること！\n"
+                                "※「確定オッズ」および「上り3F」の数値は、5.1 や 37.6 のように小数第1位までの表示とし、5.100000 のような不要な0は絶対に出力しないでください。\n\n"
                                 "2. テーブルの後に、改行して「---RESULT_MEMO---」という行をはさみ、その下に【詳細レース回顧・長文見解】を以下の5項目構成で長文かつ具体的に深掘りして出力してください：\n\n"
                                 "   📌 1. 【レース全体の展開 ＆ 馬場・ペース振り返り】\n"
                                 "   ・スタートから道中のペース（ハイ・ミドル・スロー）とトラックバイアス（内外・前後有利）の分析\n"
