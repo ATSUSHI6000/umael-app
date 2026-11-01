@@ -3877,15 +3877,16 @@ elif selected_menu == "🔄 回顧・精度検証":
             st.success("🎉 現在、未回顧の予想レースはありません（すべての予想レースの回顧・照合が完了しています）！")
             st.info("💡 過去の回顧結果を閲覧する場合は「📝 回顧・精度検証一覧（プール）」メニューをご確認ください。")
         else:
+            all_races = list(db_df["レース名"].dropna().unique())
             default_idx = 0
             if "analyzed_df" in st.session_state and not st.session_state["analyzed_df"].empty:
                 latest_race = str(st.session_state["analyzed_df"]["レース名"].iloc[0]).strip()
-                if latest_race in unrecap_races:
-                    default_idx = unrecap_races.index(latest_race)
+                if latest_race in all_races:
+                    default_idx = all_races.index(latest_race)
 
             selected_race = st.selectbox(
-                "🎯 回顧対象のレースを選択してください（※未未回顧のレースのみ表示）",
-                unrecap_races,
+                "🎯 回顧対象のレースを選択してください（※再回顧・データ上書きも可能）",
+                all_races,
                 index=default_idx
             )
 
