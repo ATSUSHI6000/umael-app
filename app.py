@@ -4113,6 +4113,13 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                             )
 
+                            # 🔗 共有用URLの自動生成＆表示枠
+                            import urllib.parse
+                            share_url = f"[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=){urllib.parse.quote(selected_race)}"
+                            st.subheader("🔗 回顧結果の共有用URL")
+                            st.code(share_url, language="text")
+                            st.caption("💡 上記のURLをコピーして貼り付けることで、他のブラウザや端末からいつでもこのレースの回顧結果を開くことができます。")
+
                             calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
                             st.subheader("🏆 全着順 ＆ 予想照合結果")
                             st.dataframe(
