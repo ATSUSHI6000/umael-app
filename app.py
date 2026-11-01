@@ -3884,11 +3884,12 @@ elif selected_menu == "🔄 回顧・精度検証":
                 if latest_race in all_races:
                     default_idx = all_races.index(latest_race)
 
+            all_races = list(db_df["レース名"].dropna().unique())
             selected_race = st.selectbox(
-                "🎯 回顧対象のレースを選択してください（※再回顧・データ上書きも可能）",
-                all_races,
-                index=default_idx
-            )
+            "🎯 回顧対象のレースを選択してください（※再回顧・データ上書きも可能）",
+            all_races,
+            index=0
+        )
 
             col_r1, col_r2 = st.columns(2)
             with col_r1:
