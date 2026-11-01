@@ -1176,14 +1176,18 @@ def save_to_db(new_df):
 
     return load_db(selected_year="全期間")
 
-def update_db_with_recap(race_name, result_df, memo_text):
+def update_db_with_recap(race_name, result_df, memo_text=""):
+    """
+    回顧結果（result_df）をデータベース（umael_database.csv）へ安全に上書き・更新する関数
+    （※ 馬番 1.0 / 1 の型ズレ自動吸収 ＆ 馬名マッチ二重ガード ＆ 年度別・スプレッドシート完全同期版）
+    """
     if not os.path.exists(DB_FILE):
         return
     try:
         df = pd.read_csv(DB_FILE, dtype=str).fillna("")
         df = df.replace({"None": "", "none": "", "nan": "", "NaN": ""})
 
-        if "レース名" not in df.columns:
+        if "レース名" not in df.columns or result_df.empty:
             return
 
         mask = df["レース名"].astype(str).str.strip() == str(race_name).strip()
@@ -1191,16 +1195,28 @@ def update_db_with_recap(race_name, result_df, memo_text):
             return
 
         # AIからの結果テーブルのカラム名を事前正規化
-        if not result_df.empty:
-            result_df = sanitize_dataframe_columns(result_df)
+        result_df = sanitize_dataframe_columns(result_df)
 
-        result_by_num = {}
-        if not result_df.empty and "馬番" in result_df.columns:
-            for _, result_row in result_df.iterrows():
-                horse_num = normalize_horse_num(result_row.get("馬番", ""))
-                if horse_num:
-                    result_by_num[horse_num] = result_row
+        # 🐴 馬番・馬名の超強力な正規化関数（1.0 などを 1 へ自動統一）
+        def clean_num(v):
+            if pd.isna(v) or not str(v).strip():
+                return ""
+            try:
+                return str(int(float(str(v).strip())))
+            except Exception:
+                return str(v).strip()
 
+        def clean_name(v):
+            return str(v).replace(" ", "").replace(" ", "").strip() if pd.notna(v) else ""
+
+        # AI結果側の検索キー作成
+        res_copy = result_df.copy()
+        if "馬番" in res_copy.columns:
+            res_copy["clean_num"] = res_copy["馬番"].apply(clean_num)
+        if "馬名" in res_copy.columns:
+            res_copy["clean_name"] = res_copy["馬名"].apply(clean_name)
+
+        # 上書き対象カラムの定義
         result_columns = [
             "確定着順", "単勝人気", "確定オッズ", "タイム", "上り3F",
             "勝因・敗因ショートメモ",
@@ -1209,20 +1225,33 @@ def update_db_with_recap(race_name, result_df, memo_text):
             if col not in df.columns:
                 df[col] = ""
 
+        # 🎯 マッチング ＆ 上書き処理
         for idx in df.index[mask]:
-            horse_num = normalize_horse_num(df.at[idx, "馬番"] if "馬番" in df.columns else "")
-            result_row = result_by_num.get(horse_num)
-            if result_row is not None:
+            db_num = clean_num(df.at[idx, "馬番"]) if "馬番" in df.columns else ""
+            db_name = clean_name(df.at[idx, "馬名"]) if "馬名" in df.columns else ""
+
+            # ① まず馬番（1.0 ➔ 1 変換後）でヒットさせる
+            match_row = pd.DataFrame()
+            if "clean_num" in res_copy.columns and db_num:
+                match_row = res_copy[res_copy["clean_num"] == db_num]
+            
+            # ② 馬番でヒットしなければ馬名でヒットさせる（二重ガード）
+            if match_row.empty and "clean_name" in res_copy.columns and db_name:
+                match_row = res_copy[res_copy["clean_name"] == db_name]
+
+            if not match_row.empty:
+                r_row = match_row.iloc[0]
+
                 # 1. 単勝人気の表記ゆれ対応
-                pop_val = result_row.get("単勝人気", result_row.get("人気", ""))
+                pop_val = r_row.get("単勝人気", r_row.get("人気", ""))
                 if pd.notna(pop_val) and str(pop_val).strip():
                     df.at[idx, "単勝人気"] = str(pop_val).strip()
 
-                # 2. 確定着順の表記ゆれ（確定着順 / 着順 / 順位 / 着）を完全網羅
+                # 2. 確定着順の表記ゆれを完全網羅
                 rank_val = ""
                 for rank_key in ["確定着順", "着順", "順位", "着"]:
-                    if rank_key in result_row and pd.notna(result_row.get(rank_key)) and str(result_row.get(rank_key)).strip():
-                        rank_val = str(result_row.get(rank_key)).strip()
+                    if rank_key in r_row and pd.notna(r_row.get(rank_key)) and str(r_row.get(rank_key)).strip():
+                        rank_val = str(r_row.get(rank_key)).strip()
                         break
                 if rank_val:
                     df.at[idx, "確定着順"] = rank_val
@@ -1230,15 +1259,18 @@ def update_db_with_recap(race_name, result_df, memo_text):
                 # 3. その他の項目を書き込み
                 for col in result_columns:
                     if col not in ["単勝人気", "確定着順"]:
-                        if col in result_row and pd.notna(result_row.get(col)) and str(result_row.get(col)).strip():
-                            df.at[idx, col] = str(result_row.get(col)).strip()
+                        if col in r_row and pd.notna(r_row.get(col)) and str(r_row.get(col)).strip():
+                            df.at[idx, col] = str(r_row.get(col)).strip()
 
-            df.at[idx, "回顧メモ"] = str(memo_text).strip()
+            # 回顧メモの全体更新
+            if memo_text:
+                df.at[idx, "回顧メモ"] = str(memo_text).strip()
 
+        # 💾 メインCSVの保存
         df = sanitize_dataframe_columns(df)
         df.to_csv(DB_FILE, index=False, encoding="utf-8-sig")
 
-        # 年度別ファイルも同期保存
+        # 📁 年度別ファイルも同期保存
         year_val = extract_year_from_race_name(race_name)
         if "年" in df.columns and mask.any():
             saved_year = str(df.loc[mask, "年"].iloc[0]).strip()
@@ -1251,11 +1283,11 @@ def update_db_with_recap(race_name, result_df, memo_text):
         year_df = year_df[[col for col in year_df.columns if col != "年"] + (["年"] if "年" in year_df.columns else [])]
         year_df.to_csv(year_db_path, index=False, encoding="utf-8-sig")
 
-        # スプレッドシート同期
+        # 📊 スプレッドシート同期
         try:
             save_db_to_sheet(df)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"スプレッドシート保存スキップ: {e}")
 
     except Exception as e:
         st.warning(f"⚠️ データベースの回顧・着順プール保存中に注意: {e}")
