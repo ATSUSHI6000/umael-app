@@ -1378,7 +1378,9 @@ def parse_json_ai_output(result_text):
             if not isinstance(race_data, dict):
                 continue
 
-            race_title = str(race_data.get("race_name") or "20261008_競馬解析_OP").strip()
+            import datetime
+            default_today_title = f"{datetime.date.today().strftime('%Y%m%d')}_レース解析"
+            race_title = str(race_data.get("race_name") or default_today_title).strip()
             confidence = race_data.get("confidence") or ""
             risk_level = race_data.get("risk_level") or ""
             race_quality_and_tenkai = race_data.get("race_quality_and_tenkai") or ""
@@ -3455,11 +3457,19 @@ if selected_menu == "📋 レース分析・予想":
                                         by="総合スコア", ascending=False
                                     ).reset_index(drop=True)
 
-                                    auto_race_title = (
-                                        df["レース名"].iloc[0]
-                                        if "レース名" in df.columns
-                                        else "20261008_競馬解析_OP"
-                                    )
+                                    import datetime
+
+                                    # 💡 正しいレース名を決定（下書き選択があれば優先、無ければdfから取得、最終 fallback は今日の日付）
+                                    if target_draft:
+                                    auto_race_title = target_draft
+                                    elif "レース名" in df.columns and not df.empty and df["レース名"].iloc[0] and "20261008_競馬解析_OP" not in str(df["レース名"].iloc[0]):
+                                    auto_race_title = df["レース名"].iloc[0]
+                                    else:
+                                    auto_race_title = f"{datetime.date.today().strftime('%Y%m%d')}_レース解析"
+
+                                    # 💡 【重要】データフレーム全体の「レース名」列を決定したタイトルで一括上書き！
+                                    df["レース名"] = auto_race_title
+
                                     save_to_db(df)
 
                                     if target_draft:
@@ -4139,12 +4149,14 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                             )
 
-                            # 🔗 共有用URLの自動生成＆表示枠
-                            import urllib.parse
-                            share_url = f"[https://umael-pro.streamlit.app/?race=](https://umael-pro.streamlit.app/?race=){urllib.parse.quote(selected_race)}"
-                            st.subheader("🔗 回顧結果の共有用URL")
-                            st.code(share_url, language="text")
-                            st.caption("💡 上記のURLをコピーして貼り付けることで、他のブラウザや端末からいつでもこのレースの回顧結果を開くことができます。")
+                            # 🔗 共有用URLの自動生成&表示枠
+import urllib.parse
+encoded_race = urllib.parse.quote(selected_race)
+share_url = f"https://umael-pro.streamlit.app/?race={encoded_race}"
+
+st.subheader("🔗 回顧結果の共有用URL")
+st.code(share_url, language="text")
+st.caption("💡 上記のURLをコピーして貼り付けることで、他のブラウザや端末からいつでもこのレースの回顧結果を直接開くことができます。")
 
                             calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
                             st.subheader("🏆 全着順 ＆ 予想照合結果")
