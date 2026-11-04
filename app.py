@@ -1003,6 +1003,8 @@ def load_db_from_sheet():
         if not data:
             return pd.DataFrame()
         df = pd.DataFrame(data).astype(str).fillna("")
+        if "馬番" in df.columns:
+            df["馬番"] = pd.to_numeric(df["馬番"], errors="coerce").fillna(0).astype(int)
         return sanitize_dataframe_columns(df)
     except Exception:
         return pd.DataFrame()
