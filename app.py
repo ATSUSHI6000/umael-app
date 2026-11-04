@@ -3461,13 +3461,13 @@ if selected_menu == "📋 レース分析・予想":
 
                                     # 💡 正しいレース名を決定（下書き選択があれば優先、無ければdfから取得、最終 fallback は今日の日付）
                                     if target_draft:
-                                    auto_race_title = target_draft
+                                        auto_race_title = target_draft
                                     elif "レース名" in df.columns and not df.empty and df["レース名"].iloc[0] and "20261008_競馬解析_OP" not in str(df["レース名"].iloc[0]):
-                                    auto_race_title = df["レース名"].iloc[0]
+                                        auto_race_title = df["レース名"].iloc[0]
                                     else:
-                                    auto_race_title = f"{datetime.date.today().strftime('%Y%m%d')}_レース解析"
+                                        auto_race_title = f"{datetime.date.today().strftime('%Y%m%d')}_レース解析"
 
-                                    # 💡 【重要】データフレーム全体の「レース名」列を決定したタイトルで一括上書き！
+                                    # 💡 データフレーム全体の「レース名」列を決定したタイトルで一括上書き！
                                     df["レース名"] = auto_race_title
 
                                     save_to_db(df)
@@ -4149,14 +4149,17 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 f"🎉 レース「{selected_race}」の複数ソース統合照合 ＆ 深掘り回顧 ＆ ルール検証が完了し、データベースに着順がプール保存されました！"
                             )
 
-                            # 🔗 共有用URLの自動生成&表示枠
-import urllib.parse
-encoded_race = urllib.parse.quote(selected_race)
-share_url = f"https://umael-pro.streamlit.app/?race={encoded_race}"
+                           # 🔗 共有用URLの自動生成&表示枠
+                            import urllib.parse
+                            encoded_race = urllib.parse.quote(selected_race)
+                            share_url = f"https://umael-pro.streamlit.app/?race={encoded_race}"
 
-st.subheader("🔗 回顧結果の共有用URL")
-st.code(share_url, language="text")
-st.caption("💡 上記のURLをコピーして貼り付けることで、他のブラウザや端末からいつでもこのレースの回顧結果を直接開くことができます。")
+                            st.subheader("🔗 回顧結果の共有用URL")
+                            st.code(share_url, language="text")
+                            st.caption("💡 上記のURLをコピーして貼り付けることで、他のブラウザや端末からいつでもこのレースの回顧結果を直接開くことができます。")
+
+                            calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
+                            st.subheader("🏆 全着順 & 予想照合結果")
 
                             calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
                             st.subheader("🏆 全着順 ＆ 予想照合結果")
