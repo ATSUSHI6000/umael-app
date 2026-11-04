@@ -1128,6 +1128,17 @@ def load_db(selected_year=None):
         target_y = str(selected_year).replace("年", "").strip()
         combined = combined[combined["年"].astype(str) == target_y].reset_index(drop=True)
 
+    # 💡 「馬番」を確実に綺麗な整数文字列（"5.0" -> "5"）へ変換
+    if not combined.empty and "馬番" in combined.columns:
+        def _to_int_str(val):
+            try:
+                if pd.isna(val) or val == "" or val is None:
+                    return ""
+                return str(int(float(val)))
+            except:
+                return str(val)
+        combined["馬番"] = combined["馬番"].apply(_to_int_str)
+
     return combined.reset_index(drop=True)
 
 
