@@ -35,6 +35,8 @@ RULE_2YO_G1_FILE = "saved_rules_2yo_g1.txt"
 RULE_2YO_GEN_FILE = "saved_rules_2yo_gen.txt"
 RULE_3YO_G1_FILE = "saved_rules_3yo_g1.txt"
 RULE_3YO_GEN_FILE = "saved_rules_3yo_gen.txt"
+RULE_JPN_FILE = "saved_rules_jpn.txt"
+
 API_KEY_FILE = "api_key.txt"
 DRAFTS_DIR = "race_drafts"
 
@@ -101,6 +103,9 @@ DEFAULT_2YO_G1_RULES = DEFAULT_G1_RULES.replace("【G1専用", "【2歳G1専用"
 DEFAULT_2YO_GEN_RULES = DEFAULT_GENERAL_RULES.replace("【平場・G2・G3専用", "【2歳G2・G3専用")
 DEFAULT_3YO_G1_RULES = DEFAULT_G1_RULES.replace("【G1専用", "【3歳G1専用")
 DEFAULT_3YO_GEN_RULES = DEFAULT_GENERAL_RULES.replace("【平場・G2・G3専用", "【3歳G2・G3専用")
+
+# 地方交流重賞専用デフォルトルールの自動生成
+DEFAULT_JPN_RULES = DEFAULT_G1_RULES.replace("【G1専用", "【地方交流重賞(Jpn)専用")
 
 
 # --------------------------------------------------
@@ -3174,11 +3179,15 @@ if selected_menu == "📋 レース分析・予想":
             "👶 2歳G2・G3専用ルール",
             "🐴 3歳G1専用ルール",
             "🐴 3歳G2・G3専用ルール",
+            "🐎 地方交流重賞(Jpn)専用ルール",  # 👈 ★選択肢を追加！
         ],
         horizontal=True,
     )
 
-    if "2歳G1" in rule_type:
+    if "地方交流" in rule_type or "Jpn" in rule_type:  # 👈 ★このif分岐を先頭に追加！
+        active_selected_rule = load_saved_rules(RULE_JPN_FILE, DEFAULT_JPN_RULES)
+        st.info("💡 現在 【 🐎 地方交流重賞(Jpn)専用ルール 】 が選択されています。")
+    elif "2歳G1" in rule_type:  # 👈 ★元の `if` を `elif` に変更！
         active_selected_rule = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
         st.info("💡 現在 【 👶 2歳G1専用ルール 】 が選択されています。")
     elif "2歳G2" in rule_type:
@@ -3637,7 +3646,7 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         "「G1専用」「平場・G2・G3」「北海道・洋芝」「2歳G1」「2歳G2・G3」「3歳G1」「3歳G2・G3」の各ルールテキストをアップロード＆保存して更新できます。"
     )
 
-    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7 = st.tabs([
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7, sub_tab8 = st.tabs([
         "🏆 G1専用(古馬/混合)",
         "🏇 平場・G2・G3(古馬/混合)",
         "🌾 北海道・洋芝専用",
@@ -3645,6 +3654,7 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
         "👶 2歳G2・G3専用",
         "🐴 3歳G1専用",
         "🐴 3歳G2・G3専用",
+        "🐎 地方交流重賞(Jpn)",
     ])
 
     # 1. G1専用ルール(古馬/混合)
@@ -3892,6 +3902,41 @@ elif selected_menu == "⚙️ ルール管理・アップデート":
             else:
                 st.error("⚠️ 空のルールは保存できません。")
 
+    # 8. 地方交流重賞(Jpn)専用ルール
+    with sub_tab8:
+        st.markdown("#### 🐎 地方交流重賞(Jpn)専用ルールのアップロード ＆ 保存")
+        current_jpn_rule = load_saved_rules(RULE_JPN_FILE, DEFAULT_JPN_RULES)
+        col_jpn_1, col_jpn_2 = st.columns([2, 1])
+        with col_jpn_1:
+            up_jpn = st.file_uploader("📂 地方交流重賞用ルールテキスト (.txt) を選択", type=["txt"], key="up_jpn_file_v5")
+            if up_jpn is not None:
+                uploaded_jpn_text = up_jpn.read().decode("utf-8", errors="ignore")
+                if uploaded_jpn_text.strip() and uploaded_jpn_text != st.session_state.get("last_up_jpn_text"):
+                    save_rules_to_file(RULE_JPN_FILE, uploaded_jpn_text)
+                    st.session_state["jpn_rule_area_input"] = uploaded_jpn_text
+                    st.session_state["last_up_jpn_text"] = uploaded_jpn_text
+                    st.toast("🎉 アップロードした地方交流重賞ルールを自動読み込み＆保存しました！")
+                    st.rerun()
+        with col_jpn_2:
+            st.write("")
+            if st.button("🔄 地方交流重賞初期ルールに戻す", key="btn_jpn_def_v5", use_container_width=True):
+                save_rules_to_file(RULE_JPN_FILE, DEFAULT_JPN_RULES)
+                st.session_state["jpn_rule_area_input"] = DEFAULT_JPN_RULES
+                st.session_state.pop("last_up_jpn_text", None)
+                st.toast("🔄 地方交流重賞初期ルールにリセットしました！")
+                st.rerun()
+
+        if "jpn_rule_area_input" not in st.session_state:
+            st.session_state["jpn_rule_area_input"] = current_jpn_rule
+
+        jpn_input_text = st.text_area("地方交流重賞専用ルールテキスト（直接編集可能）", height=300, key="jpn_rule_area_input")
+        if st.button("💾 地方交流重賞専用ルールとして更新・保存する", use_container_width=True, key="save_jpn_btn_v5"):
+            if jpn_input_text.strip():
+                save_rules_to_file(RULE_JPN_FILE, jpn_input_text)
+                st.toast("🎉 地方交流重賞専用ルールを更新・保存しました！")
+            else:
+                st.error("⚠️ 空のルールは保存できません。")
+
 
 # --------------------------------------------------
 # 🔄 4. 回顧・精度検証 メニュー
@@ -4013,6 +4058,11 @@ elif selected_menu == "🔄 回顧・精度検証":
                             elif is_3yo_tag:
                                 rule_file = globals().get("RULE_3YO_G2G3_FILE", "rule_3yo_g2g3.txt")
                                 def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", "")
+                                current_rule = load_saved_rules(rule_file, def_rule)
+
+                            elif ("jpn" in s_rule_clean or "地方" in s_rule_clean or "交流" in s_rule_clean) or any(k in target_all_text for k in ["jpn1", "jpn2", "jpn3", "地方交流", "帝王賞", "東京大賞典", "川崎記念", "かしわ記念", "さきたま杯", "全日本2歳優駿", "jbc"]):
+                                rule_file = RULE_JPN_FILE
+                                def_rule = DEFAULT_JPN_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif ("g1" in s_rule_clean and not is_2yo_tag and not is_3yo_tag) or is_senior_g1_name or (is_g1_kw and not is_2yo_tag and not is_3yo_tag):
