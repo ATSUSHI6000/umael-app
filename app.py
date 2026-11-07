@@ -4261,9 +4261,6 @@ elif selected_menu == "🔄 回顧・精度検証":
 
                             calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
                             st.subheader("🏆 全着順 & 予想照合結果")
-
-                            calc_res_height = min(500, (len(res_df) + 1) * 35 + 38)
-                            st.subheader("🏆 全着順 ＆ 予想照合結果")
                             st.dataframe(
                                 res_df.style.hide(axis="index").apply(highlight_ranks, axis=1),
                                 use_container_width=True,
