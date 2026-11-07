@@ -3509,6 +3509,7 @@ if selected_menu == "📋 レース分析・予想":
 
                                     # 💡 全データフレームの「レース名」列を綺麗に一括統一！
                                     df["レース名"] = final_race_title
+                                    df["評価ルール"] = rule_type
                                     auto_race_title = final_race_title
 
                                     save_to_db(df)
@@ -3633,6 +3634,7 @@ if selected_menu == "📋 レース分析・予想":
                                 final_race_title = f"{date_str}_{base_name}_{grade_str}"
 
                             df["レース名"] = final_race_title
+                            df["評価ルール"] = rule_type
                             auto_race_title = final_race_title
 
                             save_to_db(df)
@@ -4069,33 +4071,34 @@ elif selected_menu == "🔄 回顧・精度検証":
                             r_name_clean = str(selected_race).lower().replace(".", "・").replace("．", "・")
                             target_all_text = " ".join(target_df.astype(str).values.flatten()).replace(".", "・").replace("．", "・") + " " + r_name_clean + " " + s_rule_clean
 
-                            is_2yo_tag = ("2歳" in s_rule_clean or "2才" in s_rule_clean)
-                            is_3yo_tag = ("3歳" in s_rule_clean or "3才" in s_rule_clean)
+                            # 2歳・3歳の判定をレース名からも強力補足
+                            is_2yo_tag = ("2歳" in s_rule_clean or "2才" in s_rule_clean or "2歳" in r_name_clean or "2才" in r_name_clean)
+                            is_3yo_tag = ("3歳" in s_rule_clean or "3才" in s_rule_clean or "3歳" in r_name_clean or "3才" in r_name_clean)
                             is_g1_kw = any(k in target_all_text for k in ["g1", "ｇ１", "jpn1", "ｊｐｎ１"])
-                            is_hok_kw = any(k in target_all_text for k in ["函館", "札幌", "洋芝", "北海道"])
+                            is_hok_kw = any(k in target_all_text for k in ["函館", "札幌", "洋芝", "北海道"]) and not is_2yo_tag and not is_3yo_tag
 
                             senior_g1_names = ["天皇賞", "ジャパンカップ", "ジャパンｃ", "有馬記念", "宝塚記念", "安田記念", "マイルｃｓ", "マイルチャンピオン", "エリザベス", "ヴィクトリア", "フェブラリー", "高松宮", "スプリンターズ", "大阪杯", "チャンピオンズ"]
                             is_senior_g1_name = any(k in r_name_clean for k in senior_g1_names)
 
-                            # ルールファイルの選択
+                            # ルールファイルの正確なマッチング
                             if (is_2yo_tag and is_g1_kw) or ("2歳" in s_rule_clean and "g1" in s_rule_clean):
-                                rule_file = globals().get("RULE_2YO_G1_FILE", "rule_2yo_g1.txt")
-                                def_rule = globals().get("DEFAULT_2YO_G1_RULES", "")
+                                rule_file = RULE_2YO_G1_FILE
+                                def_rule = DEFAULT_2YO_G1_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif is_2yo_tag:
-                                rule_file = globals().get("RULE_2YO_G2G3_FILE", "rule_2yo_g2g3.txt")
-                                def_rule = globals().get("DEFAULT_2YO_G2G3_RULES", "")
+                                rule_file = RULE_2YO_GEN_FILE
+                                def_rule = DEFAULT_2YO_GEN_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif (is_3yo_tag and is_g1_kw) or (any(k in r_name_clean for k in ["皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞", "羽田盃", "東京ダービー", "ジャパンダートクラシック"])):
-                                rule_file = globals().get("RULE_3YO_G1_FILE", "rule_3yo_g1.txt")
-                                def_rule = globals().get("DEFAULT_3YO_G1_RULES", "")
+                                rule_file = RULE_3YO_G1_FILE
+                                def_rule = DEFAULT_3YO_G1_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif is_3yo_tag:
-                                rule_file = globals().get("RULE_3YO_G2G3_FILE", "rule_3yo_g2g3.txt")
-                                def_rule = globals().get("DEFAULT_3YO_G2G3_RULES", "")
+                                rule_file = RULE_3YO_GEN_FILE
+                                def_rule = DEFAULT_3YO_GEN_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif ("jpn" in s_rule_clean or "地方" in s_rule_clean or "交流" in s_rule_clean) or any(k in target_all_text for k in ["jpn1", "jpn2", "jpn3", "地方交流", "帝王賞", "東京大賞典", "川崎記念", "かしわ記念", "さきたま杯", "全日本2歳優駿", "jbc"]):
@@ -4104,18 +4107,18 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif ("g1" in s_rule_clean and not is_2yo_tag and not is_3yo_tag) or is_senior_g1_name or (is_g1_kw and not is_2yo_tag and not is_3yo_tag):
-                                rule_file = globals().get("RULE_G1_FILE", "rule_g1.txt")
-                                def_rule = globals().get("DEFAULT_G1_RULES", "")
+                                rule_file = RULE_G1_FILE
+                                def_rule = DEFAULT_G1_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             elif "北海道" in s_rule_clean or "洋芝" in s_rule_clean or is_hok_kw:
-                                rule_file = globals().get("RULE_HOKKAIDO_FILE", "rule_hokkaido.txt")
-                                def_rule = globals().get("DEFAULT_HOKKAIDO_RULES", "")
+                                rule_file = RULE_HOKKAIDO_FILE
+                                def_rule = DEFAULT_HOKKAIDO_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             else:
-                                rule_file = globals().get("RULE_GENERAL_FILE", "rule_general.txt")
-                                def_rule = globals().get("DEFAULT_GENERAL_RULES", "")
+                                rule_file = RULE_GENERAL_FILE
+                                def_rule = DEFAULT_GENERAL_RULES
                                 current_rule = load_saved_rules(rule_file, def_rule)
 
                             prompt = (
