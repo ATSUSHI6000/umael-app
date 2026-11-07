@@ -1043,7 +1043,12 @@ def save_db_to_sheet(df):
         if not all_values or len(all_values) <= 1:
             header = clean_df.columns.tolist()
             new_data = clean_df.values.tolist()
-            worksheet.update('A1', [header] + new_data)
+            # 💡 NaN混入防止フィルター処理
+            safe_new_data = [
+                ["" if (v is None or pd.isna(v) or str(v).lower() in ["nan", "none", "null"]) else str(v) for v in row]
+                for row in [header] + new_data
+            ]
+            worksheet.update('A1', safe_new_data)
             st.toast("✅ 「重賞レース分析」シートへ全データを新規保存しました！")
             return
 
@@ -1057,7 +1062,17 @@ def save_db_to_sheet(df):
             filtered_df = existing_df
         
         updated_df = pd.concat([filtered_df, clean_df], ignore_index=True)
-        updated_values = [updated_df.columns.tolist()] + updated_df.values.tolist()
+
+        # 💡 【完全防護】NaNやfloat欠損値を徹底的に空文字""へ変換・文字列化！
+        updated_df = updated_df.fillna("").astype(str)
+        updated_df = updated_df.replace({"nan": "", "NaN": "", "None": "", "null": ""})
+
+        # 💡 【完全防護】送信用リスト内のNaN/Noneを最終チェックで1個残らず空文字化
+        raw_values = [updated_df.columns.tolist()] + updated_df.values.tolist()
+        updated_values = [
+            ["" if (v is None or pd.isna(v) or str(v).lower() in ["nan", "none", "null"]) else str(v) for v in row]
+            for row in raw_values
+        ]
         
         # 🛡️ 安全ガード: 書き込み用データが正しく準備できた場合のみ clear & update を実行
         if len(updated_values) > 1:
