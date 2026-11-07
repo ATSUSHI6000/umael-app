@@ -3479,18 +3479,37 @@ if selected_menu == "📋 レース分析・予想":
                                         by="総合スコア", ascending=False
                                     ).reset_index(drop=True)
 
+                                    # 💡 【完全自動整形】ダミー名を完全排除し、20XXXXXX_レース名_GX 形式を絶対強制生成
                                     import datetime
+                                    ai_race_title = str(df["レース名"].iloc[0]).strip() if ("レース名" in df.columns and not df.empty) else ""
+                                    
+                                    # 「20261008_競馬解析_OP」などのダミー名を排除
+                                    if "競馬解析" in ai_race_title or "準備中レース" in ai_race_title:
+                                        ai_race_title = ""
 
-                                    # 💡 正しいレース名を決定（下書き選択があれば優先、無ければdfから取得、最終 fallback は今日の日付）
-                                    if target_draft:
-                                        auto_race_title = target_draft
-                                    elif "レース名" in df.columns and not df.empty and df["レース名"].iloc[0] and "20261008_競馬解析_OP" not in str(df["レース名"].iloc[0]):
-                                        auto_race_title = df["レース名"].iloc[0]
+                                    # ① AIが正しい「20XXXXXX_...」形式を出力している場合
+                                    if ai_race_title and re.match(r"^20\d{6}_", ai_race_title):
+                                        final_race_title = ai_race_title
                                     else:
-                                        auto_race_title = f"{datetime.date.today().strftime('%Y%m%d')}_レース解析"
+                                        # ② 本文・下書き名・AI出力から日付（8桁）を探す（見つからなければ本日の日付）
+                                        date_match = re.search(r"20\d{6}", comb_t1) or re.search(r"20\d{6}", ai_race_title) or re.search(r"20\d{6}", target_draft)
+                                        date_str = date_match.group(0) if date_match else time.strftime("%Y%m%d")
 
-                                    # 💡 データフレーム全体の「レース名」列を決定したタイトルで一括上書き！
-                                    df["レース名"] = auto_race_title
+                                        # ③ ベースとなるレース名の取得
+                                        base_name = target_draft if (target_draft and target_draft.strip() and not target_draft.startswith("✨")) else ai_race_title
+                                        base_name = re.sub(r"^20\d{6}_?", "", base_name).strip()
+                                        base_name = re.sub(r"_(G[1-3]|Jpn[1-3]|OP|L)$", "", base_name, flags=re.IGNORECASE).strip()
+                                        
+                                        if not base_name or "競馬解析" in base_name:
+                                            base_name = "レース解析"
+
+                                        # ④ グレードの自動判定と結合
+                                        grade_str = detect_race_grade(base_name)
+                                        final_race_title = f"{date_str}_{base_name}_{grade_str}"
+
+                                    # 💡 全データフレームの「レース名」列を綺麗に一括統一！
+                                    df["レース名"] = final_race_title
+                                    auto_race_title = final_race_title
 
                                     save_to_db(df)
 
@@ -3592,11 +3611,30 @@ if selected_menu == "📋 レース分析・予想":
                                 by="総合スコア", ascending=False
                             ).reset_index(drop=True)
 
-                            auto_race_title = (
-                                df["レース名"].iloc[0]
-                                if "レース名" in df.columns
-                                else "レース解析"
-                            )
+                            # 💡 単発解析時も 20XXXXXX_レース名_GX 形式へ強制一括整形
+                            ai_race_title = str(df["レース名"].iloc[0]).strip() if ("レース名" in df.columns and not df.empty) else ""
+                            
+                            if "競馬解析" in ai_race_title or "準備中レース" in ai_race_title:
+                                ai_race_title = ""
+
+                            if ai_race_title and re.match(r"^20\d{6}_", ai_race_title):
+                                final_race_title = ai_race_title
+                            else:
+                                date_match = re.search(r"20\d{6}", t1) or re.search(r"20\d{6}", ai_race_title)
+                                date_str = date_match.group(0) if date_match else time.strftime("%Y%m%d")
+
+                                base_name = re.sub(r"^20\d{6}_?", "", ai_race_title).strip() if ai_race_title else "レース解析"
+                                base_name = re.sub(r"_(G[1-3]|Jpn[1-3]|OP|L)$", "", base_name, flags=re.IGNORECASE).strip()
+                                
+                                if not base_name or "競馬解析" in base_name:
+                                    base_name = "レース解析"
+
+                                grade_str = detect_race_grade(base_name)
+                                final_race_title = f"{date_str}_{base_name}_{grade_str}"
+
+                            df["レース名"] = final_race_title
+                            auto_race_title = final_race_title
+
                             save_to_db(df)
 
                             st.session_state["analyzed_df"] = df
