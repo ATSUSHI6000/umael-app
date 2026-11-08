@@ -3646,11 +3646,16 @@ if selected_menu == "📋 レース分析・予想":
                                 date_match = re.search(r"20\d{6}", t1) or re.search(r"20\d{6}", ai_race_title)
                                 date_str = date_match.group(0) if date_match else time.strftime("%Y%m%d")
 
-                                base_name = re.sub(r"^20\d{6}_?", "", ai_race_title).strip() if ai_race_title else "レース解析"
+                                base_name = re.sub(r"^20\d{6}_?", "", ai_race_title).strip() if ai_race_title else ""
                                 base_name = re.sub(r"_(G[1-3]|Jpn[1-3]|OP|L)$", "", base_name, flags=re.IGNORECASE).strip()
                                 
-                                if not base_name or "競馬解析" in base_name:
-                                    base_name = "レース解析"
+                                if not base_name or "レース解析" in base_name or "競馬解析" in base_name:
+                                    fname_detected = detect_simple_race_name(files_group1, files_group2, files_group3, files_group4)
+                                    if fname_detected and "準備中レース" not in fname_detected:
+                                        base_name = fname_detected
+                                    else:
+                                        m_race = re.search(r"([一-龠ぁ-ゔァ-ヴーa-zA-Z0-9]+(?:ステークス|カップ|賞|記念|S|C|特別|オープン|OP))", t1)
+                                        base_name = m_race.group(1) if m_race else "未命名レース"
 
                                 grade_str = detect_race_grade(base_name)
                                 final_race_title = f"{date_str}_{base_name}_{grade_str}"
