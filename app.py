@@ -3510,13 +3510,20 @@ if selected_menu == "📋 レース分析・予想":
                                         date_match = re.search(r"20\d{6}", comb_t1) or re.search(r"20\d{6}", ai_race_title) or re.search(r"20\d{6}", target_draft)
                                         date_str = date_match.group(0) if date_match else time.strftime("%Y%m%d")
 
-                                        # ③ ベースとなるレース名の取得
+                                        # ③ ベースとなるレース名の取得（AI抽出 ➔ 下書き名 ➔ ファイル名 ➔ 本文検索 の順で完全自動救出！）
                                         base_name = target_draft if (target_draft and target_draft.strip() and not target_draft.startswith("✨")) else ai_race_title
                                         base_name = re.sub(r"^20\d{6}_?", "", base_name).strip()
                                         base_name = re.sub(r"_(G[1-3]|Jpn[1-3]|OP|L)$", "", base_name, flags=re.IGNORECASE).strip()
                                         
-                                        if not base_name or "競馬解析" in base_name:
-                                            base_name = "レース解析"
+                                        if not base_name or "レース解析" in base_name or "競馬解析" in base_name:
+                                            # ファイル名からレース名を自動救出
+                                            fname_detected = detect_simple_race_name(files_group1, files_group2, files_group3, files_group4)
+                                            if fname_detected and "準備中レース" not in fname_detected:
+                                                base_name = fname_detected
+                                            else:
+                                                # 本文から「〇〇ステークス」「〇〇賞」「〇〇C」などを自動検索
+                                                m_race = re.search(r"([一-龠ぁ-ゔァ-ヴーa-zA-Z0-9]+(?:ステークス|カップ|賞|記念|S|C|特別|オープン|OP))", comb_t1)
+                                                base_name = m_race.group(1) if m_race else "未命名レース"
 
                                         # ④ グレードの自動判定と結合
                                         grade_str = detect_race_grade(base_name)
@@ -4072,7 +4079,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                             ]
                             predict_summary = target_df[cols].to_string(index=False)
 
-                            # --- 🎯 DB保存ルール絶対最優先 ＆ 年齢混同完全遮断ルーティング ---
+                            # --- 🎯 DB保存ルールダイレクト最優先判定（横スベリ完全遮断） ---
                             import re
 
                             saved_rule_name = ""
@@ -4082,59 +4089,53 @@ elif selected_menu == "🔄 回顧・精度検証":
                                 if not valid_rules.empty:
                                     saved_rule_name = valid_rules.iloc[0]
 
-                            s_rule_clean = saved_rule_name.lower().replace(".", "・").replace("．", "・")
-                            r_name_clean = str(selected_race).lower().replace(".", "・").replace("．", "・")
-                            target_all_text = " ".join(target_df.astype(str).values.flatten()).replace(".", "・").replace("．", "・") + " " + r_name_clean + " " + s_rule_clean
-
-                            # 2歳・3歳の判定をレース名からも強力補足
-                            is_2yo_tag = ("2歳" in s_rule_clean or "2才" in s_rule_clean or "2歳" in r_name_clean or "2才" in r_name_clean)
-                            is_3yo_tag = ("3歳" in s_rule_clean or "3才" in s_rule_clean or "3歳" in r_name_clean or "3才" in r_name_clean)
-                            is_g1_kw = any(k in target_all_text for k in ["g1", "ｇ１", "jpn1", "ｊｐｎ１"])
-                            is_hok_kw = any(k in target_all_text for k in ["函館", "札幌", "洋芝", "北海道"]) and not is_2yo_tag and not is_3yo_tag
-
-                            senior_g1_names = ["天皇賞", "ジャパンカップ", "ジャパンｃ", "有馬記念", "宝塚記念", "安田記念", "マイルｃｓ", "マイルチャンピオン", "エリザベス", "ヴィクトリア", "フェブラリー", "高松宮", "スプリンターズ", "大阪杯", "チャンピオンズ"]
-                            is_senior_g1_name = any(k in r_name_clean for k in senior_g1_names)
-
-                            # ルールファイルの正確なマッチング
-                            if (is_2yo_tag and is_g1_kw) or ("2歳" in s_rule_clean and "g1" in s_rule_clean):
-                                rule_file = RULE_2YO_G1_FILE
-                                def_rule = DEFAULT_2YO_G1_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif is_2yo_tag:
-                                rule_file = RULE_2YO_GEN_FILE
-                                def_rule = DEFAULT_2YO_GEN_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif (is_3yo_tag and is_g1_kw) or (any(k in r_name_clean for k in ["皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞", "羽田盃", "東京ダービー", "ジャパンダートクラシック"])):
-                                rule_file = RULE_3YO_G1_FILE
-                                def_rule = DEFAULT_3YO_G1_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif is_3yo_tag:
-                                rule_file = RULE_3YO_GEN_FILE
-                                def_rule = DEFAULT_3YO_GEN_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif ("jpn" in s_rule_clean or "地方" in s_rule_clean or "交流" in s_rule_clean) or any(k in target_all_text for k in ["jpn1", "jpn2", "jpn3", "地方交流", "帝王賞", "東京大賞典", "川崎記念", "かしわ記念", "さきたま杯", "全日本2歳優駿", "jbc"]):
+                            # 💡 画面でチェックを入れたルール文字列からダイレクトにファイルを特定！
+                            if "地方交流" in saved_rule_name or "Jpn" in saved_rule_name:
                                 rule_file = RULE_JPN_FILE
                                 def_rule = DEFAULT_JPN_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif ("g1" in s_rule_clean and not is_2yo_tag and not is_3yo_tag) or is_senior_g1_name or (is_g1_kw and not is_2yo_tag and not is_3yo_tag):
+                            elif "2歳G1" in saved_rule_name:
+                                rule_file = RULE_2YO_G1_FILE
+                                def_rule = DEFAULT_2YO_G1_RULES
+                            elif "2歳G2" in saved_rule_name or "2歳G3" in saved_rule_name:
+                                rule_file = RULE_2YO_GEN_FILE
+                                def_rule = DEFAULT_2YO_GEN_RULES
+                            elif "3歳G1" in saved_rule_name:
+                                rule_file = RULE_3YO_G1_FILE
+                                def_rule = DEFAULT_3YO_G1_RULES
+                            elif "3歳G2" in saved_rule_name or "3歳G3" in saved_rule_name:
+                                rule_file = RULE_3YO_GEN_FILE
+                                def_rule = DEFAULT_3YO_GEN_RULES
+                            elif "G1専用" in saved_rule_name:
                                 rule_file = RULE_G1_FILE
                                 def_rule = DEFAULT_G1_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            elif "北海道" in s_rule_clean or "洋芝" in s_rule_clean or is_hok_kw:
+                            elif "北海道" in saved_rule_name or "洋芝" in saved_rule_name:
                                 rule_file = RULE_HOKKAIDO_FILE
                                 def_rule = DEFAULT_HOKKAIDO_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
-
-                            else:
+                            elif "平場" in saved_rule_name or "G2・G3" in saved_rule_name or "G2/G3" in saved_rule_name:
                                 rule_file = RULE_GENERAL_FILE
                                 def_rule = DEFAULT_GENERAL_RULES
-                                current_rule = load_saved_rules(rule_file, def_rule)
+                            else:
+                                # 💡 万が一DBにルール名が無い過去データ用のバックアップ自動判別
+                                r_name_clean = str(selected_race).lower()
+                                if "2歳" in r_name_clean:
+                                    rule_file = RULE_2YO_G1_FILE if "g1" in r_name_clean else RULE_2YO_GEN_FILE
+                                    def_rule = DEFAULT_2YO_G1_RULES if "g1" in r_name_clean else DEFAULT_2YO_GEN_RULES
+                                elif "3歳" in r_name_clean:
+                                    is_3g1 = "g1" in r_name_clean or any(k in r_name_clean for k in ["皐月賞", "ダービー", "オークス", "菊花賞", "桜花賞", "nhkマイル", "秋華賞"])
+                                    rule_file = RULE_3YO_G1_FILE if is_3g1 else RULE_3YO_GEN_FILE
+                                    def_rule = DEFAULT_3YO_G1_RULES if is_3g1 else DEFAULT_3YO_GEN_RULES
+                                elif "jpn" in r_name_clean or "地方" in r_name_clean:
+                                    rule_file = RULE_JPN_FILE
+                                    def_rule = DEFAULT_JPN_RULES
+                                elif "g1" in r_name_clean:
+                                    rule_file = RULE_G1_FILE
+                                    def_rule = DEFAULT_G1_RULES
+                                else:
+                                    rule_file = RULE_GENERAL_FILE
+                                    def_rule = DEFAULT_GENERAL_RULES
+
+                            # 💡 チェックを入れたルールテキストを確実にロード！
+                            current_rule = load_saved_rules(rule_file, def_rule)
 
                             prompt = (
                                 "あなたは競馬予想プロフェッショナル「AI」です。\n"
