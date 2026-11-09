@@ -1417,6 +1417,7 @@ def parse_json_ai_output(result_text):
             confidence = race_data.get("confidence") or ""
             risk_level = race_data.get("risk_level") or ""
             race_quality_and_tenkai = race_data.get("race_quality_and_tenkai") or ""
+            turbulent_factors = race_data.get("turbulent_factors") or ""
             recommended_tickets = race_data.get("recommended_tickets") or []
             recap_memo = race_data.get("recap_memo") or ""
 
@@ -1496,6 +1497,8 @@ def parse_json_ai_output(result_text):
                     row_dict["波乱度"] = risk_level
                 if race_quality_and_tenkai:
                     row_dict["レース質展開予想"] = race_quality_and_tenkai
+                if turbulent_factors:  # 👈 ★ここから2行を追加！(2-B)
+                    row_dict["波乱要素"] = turbulent_factors
                 if recommended_tickets:
                     row_dict["推奨買い目"] = json.dumps(recommended_tickets, ensure_ascii=False)
                 if recap_memo:
@@ -1548,6 +1551,11 @@ def analyze_data_with_gemini(
 （例：20261025_菊花賞_G1）
 （例：20261012_東京11Rペルセウスステークス_OP）
 
+【★波乱度 ＆ 大波乱定義の必須分析指示（全グレード共通・G1完全対応）】
+G1・重賞・平場等の【レースグレードに関係なく】、本レースの「波乱度（★☆☆〜★★★）」および「軸馬信頼度」を判定してください。
+G1であっても大波乱・波乱含みの要素がある場合、または中波乱・大波乱（★★☆〜★★★）が見込まれるレース（ハンデ戦、同型多数のハイペース前崩れ想定、指数拮抗混戦、人気馬の斤量・馬場死角等）においては、グレードを問わず例外なく「なぜ荒れるのか（波乱のトリガー・本命飛びリスク・穴馬浮上シナリオ）」を具体的に定義し、turbulent_factors フィールドに出力してください。
+また、波乱度が高いレースでは推奨買い目や展開予想にも高配当・波乱狙いのシナリオを積極的に盛り込んでください。
+
 【★レース質 ＆ 展開予想シミュレーションの必須生成指示】
 ルール仕様に基づき、本レースの『レース質（瞬発力/持続力/消耗戦/加速戦）』および『展開予想（ペース・脚質位置取り・ハナ主張・中盤隊列・直線の攻防・勝ち馬の決定打）』を臨場感ある文章で詳細に作成し、race_quality_and_tenkai フィールドに出力してください。
 
@@ -1592,6 +1600,7 @@ def analyze_data_with_gemini(
   "race_name": "必ず YYYYMMDD_レース名_グレード 形式",
   "confidence": "軸馬信頼度判定（例：S (鉄板軸) / A (有力軸) / B (波乱含み)）",
   "risk_level": "波乱度判定（例：★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)）",
+  "turbulent_factors": "💣 【大波乱・荒れる要素の定義 ＆ 激走トリガー】\n・ハンデ差や展開過熱、人気馬の死角など、本レースで波乱が起きる具体的要因と穴馬浮上シナリオを記述",
   "race_quality_and_tenkai": "🏁 【対象レース名】レース質 ＆ 展開予想シミュレーション\\n...",
   "recommended_tickets": [
     "【単勝】 ⑤ （馬名）",
@@ -2651,6 +2660,19 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
                 )
 
         st.divider()
+
+        # 💣 大波乱・荒れる要素の定義カード表示
+        if "波乱要素" in df.columns and str(df["波乱要素"].iloc[0]).strip():
+            turb_text = str(df["波乱要素"].iloc[0]).strip()
+            st.markdown(
+                f"""
+                <div style="background: linear-gradient(135deg, #3a0007 0%, #5c000b 100%); border: 2px solid #ff4d4d; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 0 15px rgba(255, 77, 77, 0.4);">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #ff4d4d; margin-bottom: 8px;">💣 【大波乱・荒れる要素の定義 ＆ 激走トリガー】</div>
+                    <div style="color: #ffffff; line-height: 1.7; white-space: pre-wrap; font-size: 0.98rem;">{turb_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         if "レース質展開予想" in df.columns and str(
             df["レース質展開予想"].iloc[0]
