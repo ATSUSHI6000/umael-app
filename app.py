@@ -2977,17 +2977,14 @@ st.markdown("""
     .card-horse-name { font-size: 1.4rem !important; font-weight: bold; color: #ffffff; margin: 6px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .card-val-gold { font-size: 2.0rem; font-weight: bold; color: #f39c12; }
     .card-val-red { font-size: 2.0rem; font-weight: bold; color: #ff4d4d; }
-    /* 通知ボックス（st.info / st.success / st.warning / st.error）の白飛び防止 */
-    div[data-testid="stAlert"] {
+    /* 通知ボックス（st.info / st.success / st.warning / st.error）の白飛び完全防止 */
+    div[data-testid="stAlert"],
+    div[data-testid="stAlert"] > div,
+    div[role="alert"] {
         background-color: #1e293b !important;
         color: #f8fafc !important;
-        border: 1px solid #475569 !important;
+        border-color: #475569 !important;
         border-radius: 8px !important;
-    }
-    div[data-testid="stAlert"] p,
-    div[data-testid="stAlert"] span,
-    div[data-testid="stAlert"] div {
-        color: #f8fafc !important;
     }
 </style>
 """, unsafe_allow_html=True)
