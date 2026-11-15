@@ -3068,7 +3068,7 @@ if mode_param in ["share", "share_recap"] and race_param:
                     if non_empty:
                         recap_text = str(non_empty[0]).strip()
 
-                st.markdown("### 📝 詳細レース回顧・プロの見解レポート")
+                st.markdown("### 📝 詳細レース回顧・見解レポート")
                 if recap_text:
                     st.markdown(
                         f"""
@@ -4511,7 +4511,7 @@ elif selected_menu == "📝 回顧・精度検証一覧（プール）":
 
             st.divider()
 
-            st.markdown("### 📝 詳細レース回顧・プロの見解レポート")
+            st.markdown("### 📝 詳細レース回顧・見解レポート")
             if recap_text:
                 st.markdown(
                     f"""
