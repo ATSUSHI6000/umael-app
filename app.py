@@ -2998,10 +2998,12 @@ query_params = st.query_params
 mode_param = query_params.get("mode", "")
 race_param = query_params.get("race", "")
 
-# 共通スタイルの適用（共有画面ではヘッダーやサイドバーを非表示）
+# ★この2行を追加（mode指定がない場合は回顧共有として扱う）
+if race_param and not mode_param:
+    mode_param = "share_recap"
+
+# 共通スタイルの適用 (共有画面ではヘッダーやサイドバーを非表示)
 if mode_param in ["share", "share_recap"] and race_param:
-    st.markdown("""
-    <style>
         [data-testid="stSidebar"] { display: none !important; }
         div[data-testid="stSidebarCollapseButton"] { display: none !important; }
         header[data-testid="stHeader"] { display: none !important; }
@@ -4318,7 +4320,7 @@ elif selected_menu == "🔄 回顧・精度検証":
                            # 🔗 共有用URLの自動生成&表示枠
                             import urllib.parse
                             encoded_race = urllib.parse.quote(selected_race)
-                            share_url = f"https://umael-pro.streamlit.app/?race={encoded_race}"
+                            share_url = f"https://umael-pro.streamlit.app/?mode=share_recap&race={encoded_race}"
 
                             st.subheader("🔗 回顧結果の共有用URL")
                             st.code(share_url, language="text")
