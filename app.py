@@ -3004,6 +3004,8 @@ if race_param and not mode_param:
 
 # 共通スタイルの適用 (共有画面ではヘッダーやサイドバーを非表示)
 if mode_param in ["share", "share_recap"] and race_param:
+    st.markdown("""
+    <style>
         [data-testid="stSidebar"] { display: none !important; }
         div[data-testid="stSidebarCollapseButton"] { display: none !important; }
         header[data-testid="stHeader"] { display: none !important; }
