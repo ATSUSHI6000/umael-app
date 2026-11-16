@@ -1629,7 +1629,7 @@ G1であっても大波乱・波乱含みの要素がある場合、または中
   "race_quality_and_tenkai": "🏁 【対象レース名】レース質 ＆ 展開予想シミュレーション\\n...",
   "recommended_tickets": [
         "【単勝】 ⑤（馬名）",
-        "【ワイド 軸1頭流し】 ⑤ ＝ ①, ②, ⑯"
+        "【ワイド 軸1頭流し】 ⑤ － ①, ②, ⑯"
     ],
   "horses": [
     {{
@@ -2037,7 +2037,7 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
       "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
       "recommended_tickets": [
         "【単勝】 ⑤（馬名）",
-        "【ワイド 軸1頭流し】 ⑤ ＝ ①, ②, ⑯"
+        "【ワイド 軸1頭流し】 ⑤ － ①, ②, ⑯"
     ],
       "horses": [
         {{
@@ -2175,7 +2175,7 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
       "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
       "recommended_tickets": [
         "【単勝】 ⑤（馬名）",
-        "【ワイド 軸1頭流し】 ⑤ ＝ ①, ②, ⑯"
+        "【ワイド 軸1頭流し】 ⑤ － ①, ②, ⑯"
     ],
       "horses": [
         {{
@@ -2536,7 +2536,7 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
     if not tickets_list:
         tickets_list = [
             f"【単勝・複勝】 {h_num} （{h_name}）",
-            f"【馬連・ワイド 軸1頭流し】 {h_num} ＝ {aite_str}",
+            f"【馬連・ワイド 軸1頭流し】 {h_num} － {aite_str}",
             f"【3連複 軸1頭流し】 {h_num} － {aite_str}",
         ]
 
