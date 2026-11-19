@@ -1946,6 +1946,15 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
                         else:
                             updated_df = parse_json_ai_output(raw_json)
                             if not updated_df.empty:
+                                # 「レース解析」での新規保存を防ぎ、元のレース名・基本情報を引き継いで上書き更新
+                                updated_df["レース名"] = race_name_val
+                                for meta_col in ["日付", "開催日", "開催", "R", "グレード", "距離", "コース"]:
+                                    if meta_col in current_df.columns and (
+                                        meta_col not in updated_df.columns
+                                        or str(updated_df[meta_col].iloc[0]).strip() in ["", "None", "nan"]
+                                    ):
+                                        updated_df[meta_col] = current_df[meta_col].iloc[0]
+
                                 save_to_db(updated_df)
                                 st.session_state["analyzed_df"] = updated_df
                                 st.success(f"🎉 **【直前データを反映完了】**\n\n{summary_msg}")
