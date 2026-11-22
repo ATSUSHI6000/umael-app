@@ -1879,6 +1879,28 @@ def generate_field_selected_races_with_gemini(
             else:
                 raise e
 
+def render_mobile_memo_expander(df, key_prefix="main"):
+    if df is None or df.empty or "メモ" not in df.columns:
+        return
+    with st.expander("📱 スマホ閲覧用：全頭詳細メモ一覧（全文表示）", expanded=False):
+        for idx, row in df.iterrows():
+            h_num = row.get("馬番", idx + 1)
+            h_name = row.get("馬名", "")
+            eval_rank = row.get("評価", "")
+            score = row.get("総合スコア", "")
+            memo_text = str(row.get("メモ", "")).strip()
+            if not memo_text or memo_text in ["None", "nan"]:
+                continue
+
+            marks = []
+            for m_col in ["軸", "ヒモ", "注", "切り"]:
+                if m_col in df.columns and str(row.get(m_col, "")).strip() == "〇":
+                    marks.append(m_col)
+            mark_str = f" / {'・'.join(marks)}" if marks else ""
+
+            st.markdown(f"**{h_num}. {h_name}**（評価: **{eval_rank}** / {score}点{mark_str}）")
+            st.write(memo_text)
+            st.markdown("---")
 
 def render_re_evaluation_section(current_df, active_rules, selected_model):
     race_name_val = current_df['レース名'].iloc[0] if "レース名" in current_df.columns else "対象レース"
@@ -2818,6 +2840,8 @@ def render_race_evaluation_view(df, is_viewer_mode=False, show_chat=True, view_m
             height=calc_table_height,
             hide_index=True,
         )
+
+        render_mobile_memo_expander(df, key_prefix="result")
 
     if show_chat:
         render_umael_chat_ui(df, race_title)
@@ -4678,6 +4702,8 @@ elif selected_menu == "🗄 過去馬データベース（プール）":
                 height=calc_db_single_height,
                 hide_index=True,
             )
+
+            render_mobile_memo_expander(disp_single_df, key_prefix="pool")
 
             st.divider()
 
