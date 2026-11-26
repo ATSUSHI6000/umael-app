@@ -1988,10 +1988,7 @@ def render_re_evaluation_section(current_df, active_rules, selected_model):
 
 
 # --------------------------------------------------
-# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数群
-# --------------------------------------------------
-# --------------------------------------------------
-# 🏇 現地観戦用（全12R・勝負5R厳選）ヘルパー関数（自動判別対応版）
+# 🏇 現地観戦用（対象日・非重賞から勝負5R厳選）ヘルパー関数（自動判別対応版）
 # --------------------------------------------------
 
 def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list, model_name):
@@ -2019,19 +2016,19 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
     if "自動判別" in selected_rule_option:
         rules_instructions = f"""
 【★重要：レース毎のルール自動判別・適用指示】
-対象となる各レースのデータ（レース名、グレード、年齢条件、開催場など）を解析し、以下の7種類の評価ルールから【レースごとに最適なルールを自動判定して適用】してください！
+対象となる各レースのデータ（レース名、年齢条件、開催場など）を解析し、以下の7種類の評価ルールから【レースごとに最適なルールを自動判定して適用】してください！
 
 [利用可能ルール定義一覧]
 1. 👶 2歳G1専用ルール: (2歳限定のG1/Jpn1レースに適用)
 {rule_2g1}
 
-2. 👶 2歳G2・G3専用ルール: (2歳限定のG2/G3/OP/条件戦/新馬/未勝利に適用)
+2. 👶 2歳G2・G3専用ルール: (2歳限定のOP/特別戦/条件戦/新馬/未勝利に適用)
 {rule_2gen}
 
 3. 🐴 3歳G1専用ルール: (3歳限定のG1/Jpn1レースに適用)
 {rule_3g1}
 
-4. 🐴 3歳G2・G3専用ルール: (3歳限定のG2/G3/OP/条件戦/未勝利に適用)
+4. 🐴 3歳G2・G3専用ルール: (3歳限定のOP/特別戦/条件戦/未勝利に適用)
 {rule_3gen}
 
 5. 🏆 G1専用ルール（古馬・混合）: (古馬・3歳以上のG1/Jpn1レースに適用)
@@ -2040,7 +2037,7 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
 6. 🌾 北海道・洋芝専用ルール: (函館・札幌の洋芝コース開催レースに適用)
 {rule_hok}
 
-7. 🏇 平場・G2・G3専用ルール（古馬・混合）: (上記以外の古馬・3歳以上条件戦/OP/G2/G3に適用)
+7. 🏇 平場・G2・G3専用ルール（古馬・混合）: (上記以外の古馬・3歳以上条件戦/特別戦/OPに適用)
 {rule_gen}
 """
     else:
@@ -2048,15 +2045,15 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
 
     selection_prompt = f"""{rules_instructions}
 
-【★現地観戦用：全12Rから勝負5R厳選＆全頭分析プロンプト】
+【★現地観戦用：対象日の平場・特別戦から勝負5R厳選＆全頭分析プロンプト】
 あなたは競馬プロ解析AI「ウマエル」です。
-提供された本日の全12レース（および裏開催重賞）のデータから、本日勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
+提供された対象開催日のレースデータ（G1/G2/G3等の重賞は単発評価専用のため除外済）の中から、本日最も勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
 
 【厳選5レースの選定絶対条件】
-1. **メインレース（11RまたはG1/G2/G3/Jpn1等の重賞）は【必ず（マストで）】選出に含めること。**
-2. 残りの4レースは、データ・展開・オッズ乖離から「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が高い」レースを厳選すること。
-3. 条件を満たせば、裏開催の重賞レースを選出対象に含めてもよい。
-4. **各レースの解析時、レースの条件（2歳戦/3歳戦/G1/洋芝/平場等）に応じた適切な評価基準を厳格に適用すること。**
+1. **重賞（G1/G2/G3/Jpn1〜3）は単発で個別評価するため一括判定の対象外とする。メインレース（11R等）の強制選出は不要。**
+2. 提供された全対象レースの中から、データ・展開・オッズ乖離を総合比較し、「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が最も高い」**上位5レースを純粋な期待値順で厳選**すること（対象レースが5レース未満の場合は全対象レースを出力）。
+3. **各レースの解析時、レースの条件（2歳戦/3歳戦/洋芝/平場・特別戦等）に応じた適切な評価基準を厳格に適用すること。**
+4. **3連複フォーメーションの2列目（相手筆頭）は【原則3頭】を標準とし、少頭数や有力馬が明確に絞れる堅めのレースに限り【2頭】へ絞ることを許容する。**
 
 【出力形式】
 必ず以下のJSONフォーマットのみを出力してください。
@@ -2064,23 +2061,23 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
 {{
   "selected_races_summary": [
     {{
-      "race_name": "選出されたレース名（例: 20261011_東京11R毎日王冠_G2）",
-      "is_main": true,
-      "reason": "選定理由（例: 本日のメイン重賞かつ軸信頼度Sのためマスト選出）",
+      "race_name": "選出されたレース名（例: 20261128_東京10R銀嶺ステークス）",
+      "is_main": false,
+      "reason": "選定理由（例: 軸信頼度Sかつ展開利が明確で勝負期待値が本日トップクラスのため選出）",
       "confidence": "S (鉄板軸) / A (有力軸) / B (波乱含み)",
       "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)"
     }}
   ],
   "races_detail": [
     {{
-      "race_name": "20261011_東京11R毎日王冠_G2",
+      "race_name": "20261128_東京10R銀嶺ステークス",
       "confidence": "S (鉄板軸)",
       "risk_level": "★☆☆ (本命堅調)",
       "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
       "recommended_tickets": [
         "【単勝】 ⑤（馬名）",
-        "【ワイド 軸1頭流し】 ⑤ － ①, ②, ⑯"
-    ],
+        "【3連複 フォーメーション】 ⑤ － ①, ②, ⑧ － ①, ②, ⑥, ⑧, ⑪, ⑯"
+      ],
       "horses": [
         {{
           "horse_num": 1,
@@ -2119,6 +2116,7 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
         ),
     )
     return response.text
+
 
 def parse_json_selected_5r(result_text):
     try:
@@ -2133,162 +2131,81 @@ def parse_json_selected_5r(result_text):
         return None
 
 
-def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list, model_name):
-    client = genai.Client(api_key=api_key)
-
-    all_races_payload_text = ""
-    media_parts_all = []
-
-    for r_name in draft_races_list:
-        t1, p1, t2, p2, t3, p3, t4, p4, t5, _ = load_draft_data(r_name)
-        combined_r_text = f"\n\n=========================================\n【対象レースデータ: {r_name}】\n=========================================\n"
-        combined_r_text += f"{t1}\n{t2}\n{t3}\n{t4}\n{t5}"
-        all_races_payload_text += combined_r_text
-        media_parts_all.extend(p1 + p2 + p3 + p4)
-
-    rule_g1 = load_saved_rules(RULE_G1_FILE, DEFAULT_G1_RULES)
-    rule_gen = load_saved_rules(RULE_GENERAL_FILE, DEFAULT_GENERAL_RULES)
-    rule_hok = load_saved_rules(RULE_HOKKAIDO_FILE, DEFAULT_HOKKAIDO_RULES)
-    rule_2g1 = load_saved_rules(RULE_2YO_G1_FILE, DEFAULT_2YO_G1_RULES)
-    rule_2gen = load_saved_rules(RULE_2YO_GEN_FILE, DEFAULT_2YO_GEN_RULES)
-    rule_3g1 = load_saved_rules(RULE_3YO_G1_FILE, DEFAULT_3YO_G1_RULES)
-    rule_3gen = load_saved_rules(RULE_3YO_GEN_FILE, DEFAULT_3YO_GEN_RULES)
-
-    if "自動判別" in selected_rule_option:
-        rules_instructions = f"""
-【★重要：レース毎のルール自動判別・適用指示】
-対象となる各レースのデータ（レース名、グレード、年齢条件、開催場など）を解析し、以下の7種類の評価ルールから【レースごとに最適なルールを自動判定して適用】してください！
-
-[利用可能ルール定義一覧]
-1. 👶 2歳G1専用ルール: (2歳限定のG1/Jpn1レースに適用)
-{rule_2g1}
-
-2. 👶 2歳G2・G3専用ルール: (2歳限定のG2/G3/OP/条件戦/新馬/未勝利に適用)
-{rule_2gen}
-
-3. 🐴 3歳G1専用ルール: (3歳限定のG1/Jpn1レースに適用)
-{rule_3g1}
-
-4. 🐴 3歳G2・G3専用ルール: (3歳限定のG2/G3/OP/条件戦/未勝利に適用)
-{rule_3gen}
-
-5. 🏆 G1専用ルール（古馬・混合）: (古馬・3歳以上のG1/Jpn1レースに適用)
-{rule_g1}
-
-6. 🌾 北海道・洋芝専用ルール: (函館・札幌の洋芝コース開催レースに適用)
-{rule_hok}
-
-7. 🏇 平場・G2・G3専用ルール（古馬・混合）: (上記以外の古馬・3歳以上条件戦/OP/G2/G3に適用)
-{rule_gen}
-"""
-    else:
-        rules_instructions = f"【指定適用ルール】\n{selected_rule_option}"
-
-    selection_prompt = f"""{rules_instructions}
-
-【★現地観戦用：全12Rから勝負5R厳選＆全頭分析プロンプト】
-あなたは競馬プロ解析AI「ウマエル」です。
-提供された本日の全12レース（および裏開催重賞）のデータから、本日勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
-
-【厳選5レースの選定絶対条件】
-1. **メインレース（11RまたはG1/G2/G3/Jpn1等の重賞）は【必ず（マストで）】選出に含めること。**
-2. 残りの4レースは、データ・展開・オッズ乖離から「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が高い」レースを厳選すること。
-3. 条件を満たせば、裏開催の重賞レースを選出対象に含めてもよい。
-4. **各レースの解析時、レースの条件（2歳戦/3歳戦/G1/洋芝/平場等）に応じた適切な評価基準を厳格に適用すること。**
-
-【出力形式】
-必ず以下のJSONフォーマットのみを出力してください。
-
-{{
-  "selected_races_summary": [
-    {{
-      "race_name": "選出されたレース名（例: 20261011_東京11R毎日王冠_G2）",
-      "is_main": true,
-      "reason": "選定理由（例: 本日のメイン重賞かつ軸信頼度Sのためマスト選出）",
-      "confidence": "S (鉄板軸) / A (有力軸) / B (波乱含み)",
-      "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)"
-    }}
-  ],
-  "races_detail": [
-    {{
-      "race_name": "20261011_東京11R毎日王冠_G2",
-      "confidence": "S (鉄板軸)",
-      "risk_level": "★☆☆ (本命堅調)",
-      "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
-      "recommended_tickets": [
-        "【単勝】 ⑤（馬名）",
-        "【ワイド 軸1頭流し】 ⑤ － ①, ②, ⑯"
-    ],
-      "horses": [
-        {{
-          "horse_num": 1,
-          "horse_name": "馬名",
-          "pop": "1",
-          "total_score": 92,
-          "eval": "S",
-          "score_shubahyou": 90,
-          "score_kettou": 92,
-          "score_choukyou": 95,
-          "score_kin5so": 90,
-          "score_tenkai": 90,
-          "score_baba": 92,
-          "jiku": "〇",
-          "himo": "",
-          "chu": "",
-          "kiri": "",
-          "memo": "【推奨】 【縦横比較】前走〇〇Sは超スローの前残りを外々回って0.1秒差まで詰めた強い内容で、今回の差し展開にも合致。【タイム評価/BP】ノーザンファーム生産馬でBP加点対象。持ち時計・TI評価ともにメンバー上位。【FB/WT/RS】好枠の偶数枠（FB○）で馬体重増減も安定（WT○）、差し脚質も今の馬場に適合（RS○）。【反証】スタートにやや課題があり、出遅れて後方一辺倒になると届かないリスクあり。 【展開利大】"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
-
-    contents = [selection_prompt + "\n\n" + all_races_payload_text]
-    contents.extend(media_parts_all[:15])
-
-    response = client.models.generate_content(
-        model=model_name,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.0,
-            seed=42,
-        ),
-    )
-    return response.text
-
-
 def render_field_mode_ui(api_key, active_selected_rule, selected_model):
-    st.subheader("🏇 現地観戦用モード：全12Rから勝負5Rを厳選分析")
-    st.caption("当日の全12レース（＋裏重賞）を蓄積し、メインレース必須＋勝負期待値の高い4Rを一括抽出します。")
+    import re
+    st.subheader("🏇 現地観戦用モード：対象日の平場・特別戦から勝負5Rを厳選分析")
+    st.caption("指定開催日のレース（G1・G2・G3等の重賞および別開催日の下書きは自動除外）から、勝負期待値の高い5Rを一括抽出します。")
 
-    draft_list = list_draft_races()
+    all_draft_list = list_draft_races()
+
+    # 重賞判定パターン（G1/G2/G3・全角・ローマ数字・Jpn・重賞表記を自動検知して除外）
+    def is_graded_race(race_str):
+        s = str(race_str)
+        return bool(re.search(r"(?:^|[_＿\s\(（\[【])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[_＿\s\)）\]】])|重賞", s, re.IGNORECASE))
+
+    # レース名先頭8桁（YYYYMMDD）から開催日を抽出
+    date_set = set()
+    for r in all_draft_list:
+        m = re.match(r"^(\d{8})", str(r).strip())
+        if m:
+            date_set.add(m.group(1))
+    sorted_dates = sorted(list(date_set))
+
+    selected_target_date = None
+    if sorted_dates:
+        today_str = datetime.now().strftime("%Y%m%d") if "datetime" in globals() else sorted_dates[0]
+        default_idx = sorted_dates.index(today_str) if today_str in sorted_dates else 0
+        selected_target_date = st.selectbox(
+            "📅 一括判定の対象開催日を選択（別日の下書きは自動除外されます）",
+            options=sorted_dates,
+            index=default_idx,
+            key="field_mode_target_date"
+        )
+
+    # 対象日かつ非重賞（平場・特別戦）のみを抽出
+    draft_list = []
+    excluded_list = []
+    for r in all_draft_list:
+        r_str = str(r).strip()
+        if is_graded_race(r_str):
+            excluded_list.append(f"{r_str}（重賞・単発評価用）")
+            continue
+        if selected_target_date:
+            m = re.match(r"^(\d{8})", r_str)
+            if m and m.group(1) != selected_target_date:
+                excluded_list.append(f"{r_str}（別日データ）")
+                continue
+        draft_list.append(r)
 
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
-        st.markdown("### 📥 1. 当日レースデータの蓄積状況")
+        st.markdown("### 📥 1. 対象レースデータの蓄積状況")
         if draft_list:
-            st.success(f"現在 **{len(draft_list)} レース分** の下書きデータが保存されています。")
-            with st.expander("📂 保存中レース一覧を表示", expanded=True):
+            st.success(f"対象日の判定候補：**{len(draft_list)} レース分**（重賞・別日は自動除外済）")
+            with st.expander("📂 一括判定の対象レース一覧", expanded=True):
                 for r_item in draft_list:
                     st.write(f"・`{r_item}`")
         else:
-            st.warning("⚠️ まだ下書き保存されたレースデータがありません。")
-            st.info("💡 「📋 レース分析・予想」の【段階的に下書き保存】機能を使って、1R〜12Rのデータを保存してください。")
+            st.warning("⚠️ 対象開催日の判定候補（重賞除く）がまだありません。")
+            st.info("💡 「📋 レース分析・予想」の【段階的に下書き保存】機能を使って、対象日のレースデータを保存してください。")
+
+        if excluded_list:
+            with st.expander(f"⏭️ 自動除外中（重賞・別日：{len(excluded_list)}件）", expanded=False):
+                for ex_item in excluded_list:
+                    st.caption(f"・{ex_item}")
 
     with col_right:
         st.markdown("### 🔥 2. 勝負レース5R一括判定")
-        st.write("蓄積されたレースデータの中からAIが**「メインレース＋勝負度上位4R」**を自動分析・選出します。")
+        st.write("重賞を除いた対象日の蓄積レースの中から、AIが**「勝負期待値上位5R」**を自動分析・選出します。")
         
-        if st.button("🚀 本日の勝負5R（メインR＋厳選4R）を一括判定実行", use_container_width=True, type="primary"):
+        if st.button("🚀 対象日の勝負5R（重賞除く）を一括判定実行", use_container_width=True, type="primary"):
             if not api_key:
                 st.error("⚠️ 右上「⚙️ 設定 (☰)」で Gemini API Key を設定してください！")
             elif len(draft_list) < 1:
-                st.warning("⚠️ 下書き保存されたレースデータがありません。")
+                st.warning("⚠️ 対象開催日の判定候補レースがありません。")
             else:
-                with st.spinner("🏇 全レースの期待値・波乱度を分析し、勝負5レースを厳選算出中..."):
+                with st.spinner("🏇 対象レース（重賞除く）の期待値・波乱度を分析し、勝負5レースを厳選算出中..."):
                     try:
                         raw_json = analyze_12r_and_select_top5(
                             api_key, active_selected_rule, draft_list, selected_model
@@ -2306,13 +2223,13 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
     if "field_mode_result" in st.session_state and st.session_state["field_mode_result"]:
         res_data = st.session_state["field_mode_result"]
         st.divider()
-        st.markdown("## 🎯 本日のウマエル厳選勝負5レース")
+        st.markdown("## 🎯 本日のウマエル厳選勝負5レース（重賞除く）")
 
         summaries = res_data.get("selected_races_summary", [])
         sum_cols = st.columns(len(summaries) if summaries else 1)
         for idx, s in enumerate(summaries):
             with sum_cols[idx % len(sum_cols)]:
-                badge = "⭐ [メインマスト]" if s.get("is_main") else f"🔥 勝負R {idx+1}"
+                badge = f"🔥 勝負R {idx+1}"
                 st.markdown(f"#### {badge}")
                 st.markdown(f"**{s.get('race_name')}**")
                 st.caption(f"信頼度: {s.get('confidence')} | 波乱度: {s.get('risk_level')}")
