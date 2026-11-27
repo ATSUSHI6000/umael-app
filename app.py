@@ -2134,7 +2134,7 @@ def parse_json_selected_5r(result_text):
 def render_field_mode_ui(api_key, active_selected_rule, selected_model):
     import re
     st.subheader("🏇 現地観戦用モード：対象日の平場・特別戦から勝負5Rを厳選分析")
-    st.caption("指定開催日のレース（G1・G2・G3等の重賞および別開催日の下書きは自動除外）から、勝負期待値の高い5Rを一括抽出します。")
+    st.caption("蓄積されたレース（G1・G2・G3等の重賞は自動除外）から、勝負期待値の高い5Rを一括抽出します。")
 
     all_draft_list = list_draft_races()
 
@@ -2165,20 +2165,22 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         "ステイヤーズS", "中日新聞杯", "カペラS", "ターコイズS", "阪神C"
     ]
 
-    # 各下書きデータの「重賞判定」と「開催日」を中身テキストも含めて自動解析
+    # 各下書きデータの「重賞判定」と「開催情報（冒頭4行目までのヘッダーのみから厳格抽出）」
     race_meta = {}
-    date_set = set()
+    kaisai_set = set()
 
     for r in all_draft_list:
         r_str = str(r).strip()
         try:
             t1, _, t2, _, t3, _, _, _, _, _ = load_draft_data(r)
-            header_text = f"{t1}\n{t2}\n{t3}"[:1500]
+            raw_joined = f"{t1}\n{t2}\n{t3}".strip()
+            # 過去走の戦績欄（前走・2走前…）に絶対に触れないよう冒頭300文字（開催条件行まで）だけ取得
+            top_header = raw_joined[:300]
         except Exception:
-            header_text = ""
+            top_header = ""
 
-        # 1. 重賞判定（レース名 + 出馬表ヘッダー内のグレード表記 + 重賞名リスト）
-        combined_check = f"{r_str}\n{header_text[:600]}"
+        # 1. 重賞判定（レース名 + 冒頭ヘッダー内のグレード表記 + 重賞名リスト）
+        combined_check = f"{r_str}\n{top_header}"
         has_grade_tag = bool(re.search(
             r"(?:^|[\s_＿\(（\[【・])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[\s_＿\)）\]】・])|重賞",
             combined_check,
@@ -2187,40 +2189,39 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         has_graded_name = any(kw in r_str for kw in GRADED_KEYWORDS)
         is_graded = has_grade_tag or has_graded_name
 
-        # 2. 開催日抽出（レース名先頭8桁 → テキスト内のYYYY年M月D日 → テキスト内のM月D日）
-        extracted_date = ""
+        # 2. 開催回次・開催日抽出（例：「5回 東京 7日目」や先頭8桁日付を冒頭ヘッダーからのみ抽出）
+        extracted_kaisai = ""
+        m_kaisai = re.search(r"(\d{1,2})\s*回\s*(札幌|函館|福島|新潟|東京|中山|中京|京都|阪神|小倉)\s*(\d{1,2})\s*日目?", top_header)
         m_prefix = re.match(r"^(\d{4})(\d{2})(\d{2})", r_str)
-        if m_prefix:
-            extracted_date = f"{m_prefix.group(1)}/{m_prefix.group(2)}/{m_prefix.group(3)}"
-        else:
-            m_ymd = re.search(r"(\d{4})[年/\-\.](\d{1,2})[月/\-\.](\d{1,2})", header_text)
-            if m_ymd:
-                extracted_date = f"{m_ymd.group(1)}/{int(m_ymd.group(2)):02d}/{int(m_ymd.group(3)):02d}"
-            else:
-                m_md = re.search(r"(\d{1,2})[月/](\d{1,2})日?", header_text)
-                if m_md:
-                    extracted_date = f"{int(m_md.group(1)):02d}/{int(m_md.group(2)):02d}"
+        m_youbi = re.search(r"(\d{1,2}月\d{1,2}日\s*[\(（][月火水木金土日][\)）])", top_header)
 
-        if extracted_date:
-            date_set.add(extracted_date)
+        if m_kaisai:
+            extracted_kaisai = f"{m_kaisai.group(1)}回 {m_kaisai.group(2)} {m_kaisai.group(3)}日目"
+        elif m_prefix:
+            extracted_kaisai = f"{m_prefix.group(1)}/{m_prefix.group(2)}/{m_prefix.group(3)}"
+        elif m_youbi:
+            extracted_kaisai = m_youbi.group(1)
+
+        if extracted_kaisai and not is_graded:
+            kaisai_set.add(extracted_kaisai)
 
         race_meta[r] = {
             "is_graded": is_graded,
-            "date": extracted_date
+            "kaisai": extracted_kaisai
         }
 
-    sorted_dates = sorted(list(date_set))
-    selected_target_date = None
-    if sorted_dates:
-        date_options = sorted_dates + ["すべての日付（制限なし）"]
-        selected_target_date = st.selectbox(
-            "📅 一括判定の対象開催日を選択（別日の下書きは自動除外されます）",
-            options=date_options,
+    sorted_kaisai = sorted(list(kaisai_set))
+    selected_target_kaisai = "すべて（重賞除く全レース）"
+    if sorted_kaisai:
+        kaisai_options = ["すべて（重賞除く全レース）"] + sorted_kaisai
+        selected_target_kaisai = st.selectbox(
+            "📅 開催場・開催日で絞り込む場合のみ選択（例：5回 東京 7日目）",
+            options=kaisai_options,
             index=0,
-            key="field_mode_target_date"
+            key="field_mode_target_kaisai"
         )
 
-    # 対象日かつ非重賞（平場・特別戦）のみを自動抽出
+    # 重賞を除外し、開催指定があればその開催のみ抽出
     auto_filtered_list = []
     excluded_list = []
     for r in all_draft_list:
@@ -2228,9 +2229,10 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         if meta["is_graded"]:
             excluded_list.append(f"{r}（重賞・単発評価用）")
             continue
-        if selected_target_date and selected_target_date != "すべての日付（制限なし）":
-            if meta["date"] and meta["date"] != selected_target_date:
-                excluded_list.append(f"{r}（別日: {meta['date']}）")
+        if selected_target_kaisai != "すべて（重賞除く全レース）":
+            if meta["kaisai"] != selected_target_kaisai:
+                disp_k = meta["kaisai"] if meta["kaisai"] else "開催情報なし"
+                excluded_list.append(f"{r}（別開催: {disp_k}）")
                 continue
         auto_filtered_list.append(r)
 
@@ -2239,32 +2241,32 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
     with col_left:
         st.markdown("### 📥 1. 対象レースデータの蓄積状況")
         if auto_filtered_list:
-            st.success(f"対象日の判定候補：**{len(auto_filtered_list)} レース分**（重賞・別日は自動除外済）")
+            st.success(f"判定候補：**{len(auto_filtered_list)} レース分**（重賞は自動除外済）")
             draft_list = st.multiselect(
                 "📂 一括判定に含めるレース（不要なレースは×で除外可能）",
                 options=auto_filtered_list,
                 default=auto_filtered_list,
-                key=f"field_mode_selected_races_{selected_target_date}"
+                key=f"field_mode_selected_races_{selected_target_kaisai}"
             )
         else:
             draft_list = []
-            st.warning("⚠️ 対象開催日の判定候補（重賞除く）がまだありません。")
+            st.warning("⚠️ 判定候補（重賞除く）がまだありません。")
             st.info("💡 「📋 レース分析・予想」の【段階的に下書き保存】機能を使って、対象日のレースデータを保存してください。")
 
         if excluded_list:
-            with st.expander(f"⏭️ 自動除外中（重賞・別日：{len(excluded_list)}件）", expanded=True):
+            with st.expander(f"⏭️ 自動除外中（重賞・別開催：{len(excluded_list)}件）", expanded=True):
                 for ex_item in excluded_list:
                     st.caption(f"・{ex_item}")
 
     with col_right:
         st.markdown("### 🔥 2. 勝負レース5R一括判定")
-        st.write("重賞を除いた対象日の蓄積レースの中から、AIが**「勝負期待値上位5R」**を自動分析・選出します。")
+        st.write("重賞を除いた蓄積レースの中から、AIが**「勝負期待値上位5R」**を自動分析・選出します。")
         
         if st.button("🚀 対象日の勝負5R（重賞除く）を一括判定実行", use_container_width=True, type="primary"):
             if not api_key:
                 st.error("⚠️ 右上「⚙️ 設定 (☰)」で Gemini API Key を設定してください！")
             elif len(draft_list) < 1:
-                st.warning("⚠️ 対象開催日の判定候補レースがありません。")
+                st.warning("⚠️ 判定候補レースがありません。")
             else:
                 with st.spinner("🏇 対象レース（重賞除く）の期待値・波乱度を分析し、勝負5レースを厳選算出中..."):
                     try:
