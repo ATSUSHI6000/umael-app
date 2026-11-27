@@ -2138,60 +2138,121 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
 
     all_draft_list = list_draft_races()
 
-    # 重賞判定パターン（G1/G2/G3・全角・ローマ数字・Jpn・重賞表記を自動検知して除外）
-    def is_graded_race(race_str):
-        s = str(race_str)
-        return bool(re.search(r"(?:^|[_＿\s\(（\[【])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[_＿\s\)）\]】])|重賞", s, re.IGNORECASE))
+    # JRA重賞キーワード（ファイル名にG1/G2/G3表記がなくても確実に弾くための補助リスト）
+    GRADED_KEYWORDS = [
+        "フェブラリーS", "高松宮記念", "大阪杯", "桜花賞", "皐月賞", "天皇賞", "NHKマイル",
+        "ヴィクトリアマイル", "オークス", "優駿牝馬", "日本ダービー", "東京優駿", "安田記念",
+        "宝塚記念", "スプリンターズS", "秋華賞", "菊花賞", "エリザベス女王杯", "マイルCS",
+        "ジャパンC", "ジャパンカップ", "チャンピオンズC", "阪神JF", "阪神ジュベナイル",
+        "朝日杯FS", "朝日杯フューチュリティ", "有馬記念", "ホープフルS",
+        "中山金杯", "京都金杯", "シンザン記念", "フェアリーS", "京成杯", "日経新春杯",
+        "アメリカJCC", "AJCC", "プロキオンS", "小倉牝馬S", "根岸S", "シルクロードS",
+        "東京新聞杯", "きさらぎ賞", "クイーンC", "共同通信杯", "京都記念", "ダイヤモンドS",
+        "阪急杯", "小倉大賞典", "中山記念", "チューリップ賞", "オーシャンS", "弥生賞",
+        "中山牝馬S", "フィリーズR", "金鯱賞", "スプリングS", "ファルコンS", "フラワーC",
+        "阪神大賞典", "愛知杯", "毎日杯", "日経賞", "マーチS", "ダービー卿CT",
+        "チャーチルダウンズC", "ニュージーランドT", "阪神牝馬S", "アンタレスS",
+        "福島牝馬S", "フローラS", "マイラーズC", "青葉賞", "ユニコーンS", "京王杯SC",
+        "新潟大賞典", "京都新聞杯", "エプソムC", "平安S", "葵S", "目黒記念", "鳴尾記念",
+        "函館SS", "府中牝馬S", "しらさぎS", "ラジオNIKKEI賞", "北九州記念", "七夕賞",
+        "函館記念", "小倉記念", "関屋記念", "エルムS", "レパードS", "CBC賞", "中京記念",
+        "札幌記念", "新潟2歳S", "キーンランドC", "新潟記念", "小倉2歳S", "京成杯AH",
+        "紫苑S", "セントウルS", "ローズS", "セントライト記念", "オールカマー", "神戸新聞杯",
+        "シリウスS", "毎日王冠", "京都大賞典", "サウジアラビアRC", "アイルランドT",
+        "富士S", "スワンS", "アルテミスS", "ファンタジーS", "京王杯2歳S", "みやこS",
+        "アルゼンチン共和国杯", "武蔵野S", "デイリー杯2歳S", "福島記念",
+        "東京スポーツ杯2歳S", "東スポ杯2歳S", "京都2歳S", "京阪杯", "チャレンジC",
+        "ステイヤーズS", "中日新聞杯", "カペラS", "ターコイズS", "阪神C"
+    ]
 
-    # レース名先頭8桁（YYYYMMDD）から開催日を抽出
+    # 各下書きデータの「重賞判定」と「開催日」を中身テキストも含めて自動解析
+    race_meta = {}
     date_set = set()
-    for r in all_draft_list:
-        m = re.match(r"^(\d{8})", str(r).strip())
-        if m:
-            date_set.add(m.group(1))
-    sorted_dates = sorted(list(date_set))
 
+    for r in all_draft_list:
+        r_str = str(r).strip()
+        try:
+            t1, _, t2, _, t3, _, _, _, _, _ = load_draft_data(r)
+            header_text = f"{t1}\n{t2}\n{t3}"[:1500]
+        except Exception:
+            header_text = ""
+
+        # 1. 重賞判定（レース名 + 出馬表ヘッダー内のグレード表記 + 重賞名リスト）
+        combined_check = f"{r_str}\n{header_text[:600]}"
+        has_grade_tag = bool(re.search(
+            r"(?:^|[\s_＿\(（\[【・])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[\s_＿\)）\]】・])|重賞",
+            combined_check,
+            re.IGNORECASE
+        ))
+        has_graded_name = any(kw in r_str for kw in GRADED_KEYWORDS)
+        is_graded = has_grade_tag or has_graded_name
+
+        # 2. 開催日抽出（レース名先頭8桁 → テキスト内のYYYY年M月D日 → テキスト内のM月D日）
+        extracted_date = ""
+        m_prefix = re.match(r"^(\d{4})(\d{2})(\d{2})", r_str)
+        if m_prefix:
+            extracted_date = f"{m_prefix.group(1)}/{m_prefix.group(2)}/{m_prefix.group(3)}"
+        else:
+            m_ymd = re.search(r"(\d{4})[年/\-\.](\d{1,2})[月/\-\.](\d{1,2})", header_text)
+            if m_ymd:
+                extracted_date = f"{m_ymd.group(1)}/{int(m_ymd.group(2)):02d}/{int(m_ymd.group(3)):02d}"
+            else:
+                m_md = re.search(r"(\d{1,2})[月/](\d{1,2})日?", header_text)
+                if m_md:
+                    extracted_date = f"{int(m_md.group(1)):02d}/{int(m_md.group(2)):02d}"
+
+        if extracted_date:
+            date_set.add(extracted_date)
+
+        race_meta[r] = {
+            "is_graded": is_graded,
+            "date": extracted_date
+        }
+
+    sorted_dates = sorted(list(date_set))
     selected_target_date = None
     if sorted_dates:
-        today_str = datetime.now().strftime("%Y%m%d") if "datetime" in globals() else sorted_dates[0]
-        default_idx = sorted_dates.index(today_str) if today_str in sorted_dates else 0
+        date_options = sorted_dates + ["すべての日付（制限なし）"]
         selected_target_date = st.selectbox(
             "📅 一括判定の対象開催日を選択（別日の下書きは自動除外されます）",
-            options=sorted_dates,
-            index=default_idx,
+            options=date_options,
+            index=0,
             key="field_mode_target_date"
         )
 
-    # 対象日かつ非重賞（平場・特別戦）のみを抽出
-    draft_list = []
+    # 対象日かつ非重賞（平場・特別戦）のみを自動抽出
+    auto_filtered_list = []
     excluded_list = []
     for r in all_draft_list:
-        r_str = str(r).strip()
-        if is_graded_race(r_str):
-            excluded_list.append(f"{r_str}（重賞・単発評価用）")
+        meta = race_meta[r]
+        if meta["is_graded"]:
+            excluded_list.append(f"{r}（重賞・単発評価用）")
             continue
-        if selected_target_date:
-            m = re.match(r"^(\d{8})", r_str)
-            if m and m.group(1) != selected_target_date:
-                excluded_list.append(f"{r_str}（別日データ）")
+        if selected_target_date and selected_target_date != "すべての日付（制限なし）":
+            if meta["date"] and meta["date"] != selected_target_date:
+                excluded_list.append(f"{r}（別日: {meta['date']}）")
                 continue
-        draft_list.append(r)
+        auto_filtered_list.append(r)
 
     col_left, col_right = st.columns([1, 1.2])
 
     with col_left:
         st.markdown("### 📥 1. 対象レースデータの蓄積状況")
-        if draft_list:
-            st.success(f"対象日の判定候補：**{len(draft_list)} レース分**（重賞・別日は自動除外済）")
-            with st.expander("📂 一括判定の対象レース一覧", expanded=True):
-                for r_item in draft_list:
-                    st.write(f"・`{r_item}`")
+        if auto_filtered_list:
+            st.success(f"対象日の判定候補：**{len(auto_filtered_list)} レース分**（重賞・別日は自動除外済）")
+            draft_list = st.multiselect(
+                "📂 一括判定に含めるレース（不要なレースは×で除外可能）",
+                options=auto_filtered_list,
+                default=auto_filtered_list,
+                key=f"field_mode_selected_races_{selected_target_date}"
+            )
         else:
+            draft_list = []
             st.warning("⚠️ 対象開催日の判定候補（重賞除く）がまだありません。")
             st.info("💡 「📋 レース分析・予想」の【段階的に下書き保存】機能を使って、対象日のレースデータを保存してください。")
 
         if excluded_list:
-            with st.expander(f"⏭️ 自動除外中（重賞・別日：{len(excluded_list)}件）", expanded=False):
+            with st.expander(f"⏭️ 自動除外中（重賞・別日：{len(excluded_list)}件）", expanded=True):
                 for ex_item in excluded_list:
                     st.caption(f"・{ex_item}")
 
