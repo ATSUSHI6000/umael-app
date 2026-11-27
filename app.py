@@ -2302,7 +2302,6 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
 
         details = res_data.get("races_detail", [])
         if details:
-            # 英語JSONキー → アプリ標準の日本語列名への変換マップ
             col_rename_map = {
                 "horse_num": "馬番",
                 "horse_name": "馬名",
@@ -2326,35 +2325,42 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
             if "field_mode_saved_races" not in st.session_state:
                 st.session_state["field_mode_saved_races"] = set()
 
-            tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
-            tabs = st.tabs(tab_titles)
+            # 全5レース分のDataFrameを構築し、未保存のレースはまとめてDB保存
+            built_dfs = []
+            for idx, r_detail in enumerate(details):
+                h_list = r_detail.get("horses", [])
+                r_name_str = r_detail.get("race_name", f"R{idx+1}")
+                if h_list:
+                    df_r = pd.DataFrame(h_list).rename(columns=col_rename_map)
+                    if "予想人気" not in df_r.columns:
+                        df_r["予想人気"] = df_r["人気"] if "人気" in df_r.columns else ""
+                    if "総合スコアグラフ" not in df_r.columns and "総合スコア" in df_r.columns:
+                        df_r["総合スコアグラフ"] = df_r["総合スコア"].apply(
+                            lambda v: "■" * max(0, min(20, int(round(float(v) / 5.0)))) if pd.notna(v) and str(v).strip() != "" else ""
+                        )
+                    df_r["レース名"] = r_name_str
+                    df_r["信頼度"] = r_detail.get("confidence", "")
+                    df_r["波乱度"] = r_detail.get("risk_level", "")
+                    df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
+                    df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
 
-            for idx, tab in enumerate(tabs):
-                with tab:
-                    r_detail = details[idx]
-                    h_list = r_detail.get("horses", [])
-                    if h_list:
-                        df_r = pd.DataFrame(h_list).rename(columns=col_rename_map)
-                        r_name_str = r_detail.get("race_name", "")
+                    if r_name_str not in st.session_state["field_mode_saved_races"]:
+                        save_to_db(df_r)
+                        st.session_state["field_mode_saved_races"].add(r_name_str)
+                    built_dfs.append((r_name_str, df_r))
 
-                        if "予想人気" not in df_r.columns:
-                            df_r["予想人気"] = df_r["人気"] if "人気" in df_r.columns else ""
-                        if "総合スコアグラフ" not in df_r.columns and "総合スコア" in df_r.columns:
-                            df_r["総合スコアグラフ"] = df_r["総合スコア"].apply(
-                                lambda v: "■" * max(0, min(20, int(round(float(v) / 5.0)))) if pd.notna(v) and str(v).strip() != "" else ""
-                            )
-
-                        df_r["レース名"] = r_name_str
-                        df_r["信頼度"] = r_detail.get("confidence", "")
-                        df_r["波乱度"] = r_detail.get("risk_level", "")
-                        df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
-                        df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
-
-                        if r_name_str not in st.session_state["field_mode_saved_races"]:
-                            save_to_db(df_r)
-                            st.session_state["field_mode_saved_races"].add(r_name_str)
-
-                        render_race_evaluation_view(df_r, is_viewer_mode=False, show_chat=True)
+            if built_dfs:
+                # 同時描画によるボタンID重複を防ぐため、選択された1レースのみを描画
+                race_options = [f"🔥 勝負R{i+1}: {name}" for i, (name, _) in enumerate(built_dfs)]
+                selected_race_label = st.radio(
+                    "📌 詳細を表示する勝負レースを選択（切り替えて全5Rを確認できます）",
+                    options=race_options,
+                    horizontal=True,
+                    key="field_mode_active_race_selector"
+                )
+                selected_idx = race_options.index(selected_race_label)
+                _, target_df = built_dfs[selected_idx]
+                render_race_evaluation_view(target_df, is_viewer_mode=False, show_chat=True)
 
 
 # --------------------------------------------------
