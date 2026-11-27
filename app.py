@@ -2174,7 +2174,6 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         try:
             t1, _, t2, _, t3, _, _, _, _, _ = load_draft_data(r)
             raw_joined = f"{t1}\n{t2}\n{t3}".strip()
-            # 過去走の戦績欄（前走・2走前…）に絶対に触れないよう冒頭300文字（開催条件行まで）だけ取得
             top_header = raw_joined[:300]
         except Exception:
             top_header = ""
@@ -2276,6 +2275,7 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                         parsed_data = parse_json_selected_5r(raw_json)
                         if parsed_data:
                             st.session_state["field_mode_result"] = parsed_data
+                            st.session_state["field_mode_saved_races"] = set()
                             st.success("🎉 勝負5レースの厳選・詳細分析が完了しました！")
                             st.rerun()
                         else:
@@ -2302,6 +2302,30 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
 
         details = res_data.get("races_detail", [])
         if details:
+            # 英語JSONキー → アプリ標準の日本語列名への変換マップ
+            col_rename_map = {
+                "horse_num": "馬番",
+                "horse_name": "馬名",
+                "pop": "人気",
+                "pred_pop": "予想人気",
+                "total_score": "総合スコア",
+                "eval": "評価（S.A+.A.B+.B.C）",
+                "score_shubahyou": "出馬表点",
+                "score_kettou": "血統点",
+                "score_choukyou": "調教点",
+                "score_kin5so": "近5走点",
+                "score_tenkai": "展開点",
+                "score_baba": "馬場点",
+                "jiku": "軸（〇）",
+                "himo": "ヒモ（〇）",
+                "chu": "注（〇）",
+                "kiri": "切り（〇）",
+                "memo": "メモ",
+            }
+
+            if "field_mode_saved_races" not in st.session_state:
+                st.session_state["field_mode_saved_races"] = set()
+
             tab_titles = [f"🏇 {d.get('race_name', f'R{i+1}')}" for i, d in enumerate(details)]
             tabs = st.tabs(tab_titles)
 
@@ -2310,14 +2334,26 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                     r_detail = details[idx]
                     h_list = r_detail.get("horses", [])
                     if h_list:
-                        df_r = pd.DataFrame(h_list)
-                        df_r["レース名"] = r_detail.get("race_name", "")
+                        df_r = pd.DataFrame(h_list).rename(columns=col_rename_map)
+                        r_name_str = r_detail.get("race_name", "")
+
+                        if "予想人気" not in df_r.columns:
+                            df_r["予想人気"] = df_r["人気"] if "人気" in df_r.columns else ""
+                        if "総合スコアグラフ" not in df_r.columns and "総合スコア" in df_r.columns:
+                            df_r["総合スコアグラフ"] = df_r["総合スコア"].apply(
+                                lambda v: "■" * max(0, min(20, int(round(float(v) / 5.0)))) if pd.notna(v) and str(v).strip() != "" else ""
+                            )
+
+                        df_r["レース名"] = r_name_str
                         df_r["信頼度"] = r_detail.get("confidence", "")
                         df_r["波乱度"] = r_detail.get("risk_level", "")
                         df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
                         df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
-                        
-                        save_to_db(df_r)
+
+                        if r_name_str not in st.session_state["field_mode_saved_races"]:
+                            save_to_db(df_r)
+                            st.session_state["field_mode_saved_races"].add(r_name_str)
+
                         render_race_evaluation_view(df_r, is_viewer_mode=False, show_chat=True)
 
 
