@@ -2054,6 +2054,12 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
 2. 提供された全対象レースの中から、データ・展開・オッズ乖離を総合比較し、「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が最も高い」**上位5レースを純粋な期待値順で厳選**すること（対象レースが5レース未満の場合は全対象レースを出力）。
 3. **各レースの解析時、レースの条件（2歳戦/3歳戦/洋芝/平場・特別戦等）に応じた適切な評価基準を厳格に適用すること。**
 4. **3連複フォーメーションの2列目（相手筆頭）は【原則3頭】を標準とし、少頭数や有力馬が明確に絞れる堅めのレースに限り【2頭】へ絞ることを許容する。**
+5. **推奨買い目（recommended_tickets）の券種選定ルール（厳守）：**
+   - 「馬単」は原則使用しないこと（よほど1着・2着の着順が明確な特殊ケース以外は候補から除外する）。
+   - 【単勝・複勝・ワイド・馬連・三連複・三連単】の6券種から、各レースの信頼度・波乱度・オッズ妙味に応じて最も期待値が高い2〜4パターンを柔軟に選定すること。
+   - ★☆☆（本命堅調）: 単勝（厚め）・馬連（本線流し）・絞った三連複・三連単（1着固定フォーメーション）など、点数を絞って回収率を高める構成にする。
+   - ★★☆（中波乱警戒）: 単勝・馬連（流し/BOX）・ワイド（厚め）・三連複フォーメーションなど、本線と妙味のバランスを重視する。
+   - ★★★（大波乱混戦）: 複勝・ワイド（BOX/流し）・馬連BOX・三連複フォーメーション/BOXなど、高配当の取りこぼしを防ぐ構成にする。
 
 【出力形式】
 必ず以下のJSONフォーマットのみを出力してください。
@@ -2075,8 +2081,9 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
       "risk_level": "★☆☆ (本命堅調)",
       "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
       "recommended_tickets": [
-        "【単勝】 ⑤（馬名）",
-        "【3連複 フォーメーション】 ⑤ － ①, ②, ⑧ － ①, ②, ⑥, ⑧, ⑪, ⑯"
+        "【最適券種1（単勝・複勝・ワイド・馬連・三連複・三連単から選択）】買い目（点数）：選定理由と期待値根拠",
+        "【最適券種2（上記6券種から選択）】買い目（点数）：本線抑え・配当妙味狙い",
+        "【三連複フォーメーション】軸馬 - 相手筆頭3頭 - 3列目候補（点数）：2列目に相手筆頭3頭を据え、抜け目なくカバー"
       ],
       "horses": [
         {{
@@ -2342,7 +2349,20 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                     df_r["信頼度"] = r_detail.get("confidence", "")
                     df_r["波乱度"] = r_detail.get("risk_level", "")
                     df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
-                    df_r["推奨買い目"] = json.dumps(r_detail.get("recommended_tickets", []), ensure_ascii=False)
+                    raw_tickets = r_detail.get("recommended_tickets", [])
+                    formatted_tickets = []
+                    for t in raw_tickets:
+                        if isinstance(t, dict):
+                            t_type = t.get("type", "")
+                            t_comb = t.get("combination", "")
+                            t_pts = t.get("points", "")
+                            t_rsn = t.get("reason", "")
+                            pts_str = f"（{t_pts}）" if t_pts else ""
+                            rsn_str = f"：{t_rsn}" if t_rsn else ""
+                            formatted_tickets.append(f"【{t_type}】{t_comb}{pts_str}{rsn_str}")
+                        else:
+                            formatted_tickets.append(str(t))
+                    df_r["推奨買い目"] = json.dumps(formatted_tickets, ensure_ascii=False)
 
                     if r_name_str not in st.session_state["field_mode_saved_races"]:
                         save_to_db(df_r)
