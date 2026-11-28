@@ -1182,6 +1182,49 @@ def save_to_db(new_df):
     save_races = clean_save_df["レース名"].astype(str).str.strip().unique().tolist()
     save_races = [r for r in save_races if r]
 
+    # 【DB保存対象フィルタ】重賞（G1/G2/G3/Jpn1〜3）のみDB保存し、平場・特別・OP・Lはスキップ
+    GRADED_KEYWORDS_DB = [
+        "フェブラリーS", "高松宮記念", "大阪杯", "桜花賞", "皐月賞", "天皇賞", "NHKマイル",
+        "ヴィクトリアマイル", "オークス", "優駿牝馬", "日本ダービー", "東京優駿", "安田記念",
+        "宝塚記念", "スプリンターズS", "秋華賞", "菊花賞", "エリザベス女王杯", "マイルCS",
+        "ジャパンC", "ジャパンカップ", "チャンピオンズC", "阪神JF", "阪神ジュベナイル",
+        "朝日杯FS", "朝日杯フューチュリティ", "有馬記念", "ホープフルS",
+        "中山金杯", "京都金杯", "シンザン記念", "フェアリーS", "京成杯", "日経新春杯",
+        "アメリカJCC", "AJCC", "プロキオンS", "小倉牝馬S", "根岸S", "シルクロードS",
+        "東京新聞杯", "きさらぎ賞", "クイーンC", "共同通信杯", "京都記念", "ダイヤモンドS",
+        "阪急杯", "小倉大賞典", "中山記念", "チューリップ賞", "オーシャンS", "弥生賞",
+        "中山牝馬S", "フィリーズR", "金鯱賞", "スプリングS", "ファルコンS", "フラワーC",
+        "阪神大賞典", "愛知杯", "毎日杯", "日経賞", "マーチS", "ダービー卿CT",
+        "チャーチルダウンズC", "ニュージーランドT", "阪神牝馬S", "アンタレスS",
+        "福島牝馬S", "フローラS", "マイラーズC", "青葉賞", "ユニコーンS", "京王杯SC",
+        "新潟大賞典", "京都新聞杯", "エプソムC", "平安S", "葵S", "目黒記念", "鳴尾記念",
+        "函館SS", "府中牝馬S", "しらさぎS", "ラジオNIKKEI賞", "北九州記念", "七夕賞",
+        "函館記念", "小倉記念", "関屋記念", "エルムS", "レパードS", "CBC賞", "中京記念",
+        "札幌記念", "新潟2歳S", "キーンランドC", "新潟記念", "小倉2歳S", "京成杯AH",
+        "紫苑S", "セントウルS", "ローズS", "セントライト記念", "オールカマー", "神戸新聞杯",
+        "シリウスS", "毎日王冠", "京都大賞典", "サウジアラビアRC", "アイルランドT",
+        "富士S", "スワンS", "アルテミスS", "ファンタジーS", "京王杯2歳S", "みやこS",
+        "アルゼンチン共和国杯", "武蔵野S", "デイリー杯2歳S", "福島記念",
+        "東京スポーツ杯2歳S", "東スポ杯2歳S", "京都2歳S", "京阪杯", "チャレンジC",
+        "ステイヤーズS", "中日新聞杯", "カペラS", "ターコイズS", "阪神C"
+    ]
+
+    def _is_graded_race_for_db(r_name_val):
+        s = str(r_name_val).strip()
+        has_grade = bool(re.search(
+            r"(?:^|[\s_＿\(（\[【・])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[\s_＿\)）\]】・])|重賞",
+            s,
+            re.IGNORECASE
+        ))
+        has_kw = any(kw in s for kw in GRADED_KEYWORDS_DB)
+        return has_grade or has_kw
+
+    save_races = [r for r in save_races if _is_graded_race_for_db(r)]
+    if not save_races:
+        st.caption("ℹ️ 非重賞（平場・特別・OP・L）のためデータベース（プール）への保存はスキップしました。")
+        return load_db()
+    clean_save_df = clean_save_df[clean_save_df["レース名"].astype(str).str.strip().isin(save_races)]
+
     if os.path.exists(DB_FILE):
         try:
             root_df = pd.read_csv(DB_FILE, dtype=str).fillna("")
@@ -2045,66 +2088,30 @@ def analyze_12r_and_select_top5(api_key, selected_rule_option, draft_races_list,
 
     selection_prompt = f"""{rules_instructions}
 
-【★現地観戦用：対象日の平場・特別戦から勝負5R厳選＆全頭分析プロンプト】
+【★現地観戦用：対象日の平場・特別戦から勝負5R厳選レーダープロンプト】
 あなたは競馬プロ解析AI「ウマエル」です。
-提供された対象開催日のレースデータ（G1/G2/G3等の重賞は単発評価専用のため除外済）の中から、本日最も勝負すべき【厳選5レース】を選出し、その5レースについて詳細解析を出力してください。
+提供された対象開催日のレースデータ（G1/G2/G3等の重賞は単発評価専用のため除外済）のすべてを横断比較し、
+本日最も勝負期待値が高い【厳選5レース】だけを選出してください。
+（※各レースの詳細な全頭採点・買い目出しはこの後の「単発精密評価」で行うため不要です。その分、全対象レースの比較と勝負レース選びに思考リソースを100%集中させてください。）
 
 【厳選5レースの選定絶対条件】
-1. **重賞（G1/G2/G3/Jpn1〜3）は単発で個別評価するため一括判定の対象外とする。メインレース（11R等）の強制選出は不要。**
-2. 提供された全対象レースの中から、データ・展開・オッズ乖離を総合比較し、「軸馬の信頼度が高い」「穴馬の妙味が大きい」「勝負期待値が最も高い」**上位5レースを純粋な期待値順で厳選**すること（対象レースが5レース未満の場合は全対象レースを出力）。
-3. **各レースの解析時、レースの条件（2歳戦/3歳戦/洋芝/平場・特別戦等）に応じた適切な評価基準を厳格に適用すること。**
-4. **3連複フォーメーションの2列目（相手筆頭）は【原則3頭】を標準とし、少頭数や有力馬が明確に絞れる堅めのレースに限り【2頭】へ絞ることを許容する。**
-5. **推奨買い目（recommended_tickets）の券種選定ルール（厳守）：**
-   - 「馬単」は原則使用しないこと（よほど1着・2着の着順が明確な特殊ケース以外は候補から除外する）。
-   - 【単勝・複勝・ワイド・馬連・三連複・三連単】の6券種から、各レースの信頼度・波乱度・オッズ妙味に応じて最も期待値が高い2〜4パターンを柔軟に選定すること。
-   - ★☆☆（本命堅調）: 単勝（厚め）・馬連（本線流し）・絞った三連複・三連単（1着固定フォーメーション）など、点数を絞って回収率を高める構成にする。
-   - ★★☆（中波乱警戒）: 単勝・馬連（流し/BOX）・ワイド（厚め）・三連複フォーメーションなど、本線と妙味のバランスを重視する。
-   - ★★★（大波乱混戦）: 複勝・ワイド（BOX/流し）・馬連BOX・三連複フォーメーション/BOXなど、高配当の取りこぼしを防ぐ構成にする。
+1. **重賞（G1/G2/G3/Jpn1〜3）は対象外。メインレース（11R等）の強制選出は不要。**
+2. 提供された全対象レースの中から、能力指数・展開利・コース適性・オッズ乖離を総合比較し、「軸馬の信頼度が極めて高い」「過小評価されている妙味馬がいる」「勝負期待値が最も高い」**上位5レースを純粋な期待値順で厳選**すること（対象レースが5レース未満の場合は全対象レースを出力）。
+3. **各レースの条件（2歳戦/3歳戦/洋芝/平場・特別戦等）に応じた評価基準を前提に期待値を判定すること。**
+4. `race_name` には、入力データの `【対象レースデータ: ○○】` に記載された**レース名を一言一句変えずにそのまま出力**すること（単発評価画面との自動連携に使用するため厳守）。
 
 【出力形式】
-必ず以下のJSONフォーマットのみを出力してください。
+必ず以下のJSONフォーマットのみを出力してください（マークダウン不要）。
 
 {{
   "selected_races_summary": [
     {{
-      "race_name": "選出されたレース名（例: 20261128_東京10R銀嶺ステークス）",
-      "is_main": false,
-      "reason": "選定理由（例: 軸信頼度Sかつ展開利が明確で勝負期待値が本日トップクラスのため選出）",
+      "race_name": "入力データと完全一致するレース名（例: 20261128_東京10RシャングリラS）",
       "confidence": "S (鉄板軸) / A (有力軸) / B (波乱含み)",
-      "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)"
-    }}
-  ],
-  "races_detail": [
-    {{
-      "race_name": "20261128_東京10R銀嶺ステークス",
-      "confidence": "S (鉄板軸)",
-      "risk_level": "★☆☆ (本命堅調)",
-      "race_quality_and_tenkai": "🏁 レース質 ＆ 展開予想シミュレーション...",
-      "recommended_tickets": [
-        "【最適券種1（単勝・複勝・ワイド・馬連・三連複・三連単から選択）】買い目（点数）：選定理由と期待値根拠",
-        "【最適券種2（上記6券種から選択）】買い目（点数）：本線抑え・配当妙味狙い",
-        "【三連複フォーメーション】軸馬 - 相手筆頭3頭 - 3列目候補（点数）：2列目に相手筆頭3頭を据え、抜け目なくカバー"
-      ],
-      "horses": [
-        {{
-          "horse_num": 1,
-          "horse_name": "馬名",
-          "pop": "1",
-          "total_score": 92,
-          "eval": "S",
-          "score_shubahyou": 90,
-          "score_kettou": 92,
-          "score_choukyou": 95,
-          "score_kin5so": 90,
-          "score_tenkai": 90,
-          "score_baba": 92,
-          "jiku": "〇",
-          "himo": "",
-          "chu": "",
-          "kiri": "",
-          "memo": "【推奨】 【縦横比較】前走〇〇Sは超スローの前残りを外々回って0.1秒差まで詰めた強い内容で、今回の差し展開にも合致。【タイム評価/BP】ノーザンファーム生産馬でBP加点対象。持ち時計・TI評価ともにメンバー上位。【FB/WT/RS】好枠の偶数枠（FB○）で馬体重増減も安定（WT○）、差し脚質も今の馬場に適合（RS○）。【反証】スタートにやや課題があり、出遅れて後方一辺倒になると届かないリスクあり。 【展開利大】"
-        }}
-      ]
+      "risk_level": "★☆☆ (本命堅調) / ★★☆ (中波乱警戒) / ★★★ (大波乱混戦)",
+      "target_horses": "注目軸馬・妙味穴馬（例：軸候補 ⑥マジッククッキー / 妙味穴 ⑪ウィロークリーク）",
+      "key_point": "展開・コース適性・オッズ乖離の狙い目ポイント（80〜120文字）",
+      "reason": "このレースを本日屈指の勝負レースに選出した決定的な根拠（100〜150文字）"
     }}
   ]
 }}
@@ -2140,8 +2147,8 @@ def parse_json_selected_5r(result_text):
 
 def render_field_mode_ui(api_key, active_selected_rule, selected_model):
     import re
-    st.subheader("🏇 現地観戦用モード：対象日の平場・特別戦から勝負5Rを厳選分析")
-    st.caption("蓄積されたレース（G1・G2・G3等の重賞は自動除外）から、勝負期待値の高い5Rを一括抽出します。")
+    st.subheader("🏇 現地観戦用モード：対象日の平場・特別戦から勝負5Rを厳選")
+    st.caption("蓄積されたレース（G1・G2・G3等の重賞は自動除外）から勝負期待値上位5Rを抽出し、単発の精密解析へ直行できます。")
 
     all_draft_list = list_draft_races()
 
@@ -2172,7 +2179,7 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         "ステイヤーズS", "中日新聞杯", "カペラS", "ターコイズS", "阪神C"
     ]
 
-    # 各下書きデータの「重賞判定」と「開催情報（冒頭4行目までのヘッダーのみから厳格抽出）」
+    # 各下書きデータの「重賞判定」と「開催情報（冒頭ヘッダーのみから厳格抽出）」
     race_meta = {}
     kaisai_set = set()
 
@@ -2185,7 +2192,6 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         except Exception:
             top_header = ""
 
-        # 1. 重賞判定（レース名 + 冒頭ヘッダー内のグレード表記 + 重賞名リスト）
         combined_check = f"{r_str}\n{top_header}"
         has_grade_tag = bool(re.search(
             r"(?:^|[\s_＿\(（\[【・])(?:G[123ⅠⅡⅢ]|Ｇ[１２３]|Jpn[123ⅠⅡⅢ]|Ｊｐｎ[１２３])(?:$|[\s_＿\)）\]】・])|重賞",
@@ -2195,7 +2201,6 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         has_graded_name = any(kw in r_str for kw in GRADED_KEYWORDS)
         is_graded = has_grade_tag or has_graded_name
 
-        # 2. 開催回次・開催日抽出（例：「5回 東京 7日目」や先頭8桁日付を冒頭ヘッダーからのみ抽出）
         extracted_kaisai = ""
         m_kaisai = re.search(r"(\d{1,2})\s*回\s*(札幌|函館|福島|新潟|東京|中山|中京|京都|阪神|小倉)\s*(\d{1,2})\s*日目?", top_header)
         m_prefix = re.match(r"^(\d{4})(\d{2})(\d{2})", r_str)
@@ -2227,7 +2232,6 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
             key="field_mode_target_kaisai"
         )
 
-    # 重賞を除外し、開催指定があればその開催のみ抽出
     auto_filtered_list = []
     excluded_list = []
     for r in all_draft_list:
@@ -2265,16 +2269,17 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                     st.caption(f"・{ex_item}")
 
     with col_right:
-        st.markdown("### 🔥 2. 勝負レース5R一括判定")
-        st.write("重賞を除いた蓄積レースの中から、AIが**「勝負期待値上位5R」**を自動分析・選出します。")
-        
+        st.markdown("### 🔥 2. 勝負レース5R一括判定（選出レーダー）")
+        st.write("重賞を除いた蓄積レースの中から、AIが**「勝負期待値上位5R」**を厳選ピックアップします。")
+        st.caption("💡 選出後は各レースの「単発評価で精密解析する」ボタンから、当日の馬場・パドックを加味して最終買い目を算出できます。")
+
         if st.button("🚀 対象日の勝負5R（重賞除く）を一括判定実行", use_container_width=True, type="primary"):
             if not api_key:
                 st.error("⚠️ 右上「⚙️ 設定 (☰)」で Gemini API Key を設定してください！")
             elif len(draft_list) < 1:
                 st.warning("⚠️ 判定候補レースがありません。")
             else:
-                with st.spinner("🏇 対象レース（重賞除く）の期待値・波乱度を分析し、勝負5レースを厳選算出中..."):
+                with st.spinner("🏇 全対象レースの期待値・オッズ乖離を横断比較し、勝負5レースを厳選中..."):
                     try:
                         raw_json = analyze_12r_and_select_top5(
                             api_key, active_selected_rule, draft_list, selected_model
@@ -2282,8 +2287,7 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
                         parsed_data = parse_json_selected_5r(raw_json)
                         if parsed_data:
                             st.session_state["field_mode_result"] = parsed_data
-                            st.session_state["field_mode_saved_races"] = set()
-                            st.success("🎉 勝負5レースの厳選・詳細分析が完了しました！")
+                            st.success("🎉 勝負5レースの厳選が完了しました！気になるレースを単発精密解析へ送れます。")
                             st.rerun()
                         else:
                             st.error("❌ 解析データの生成に失敗しました。再度実行してください。")
@@ -2294,93 +2298,42 @@ def render_field_mode_ui(api_key, active_selected_rule, selected_model):
         res_data = st.session_state["field_mode_result"]
         st.divider()
         st.markdown("## 🎯 本日のウマエル厳選勝負5レース（重賞除く）")
+        st.info("👇 勝負したいレースの **「🔍 単発評価で精密解析する」** を押すと、該当レースの下書きが自動セットされた状態で単発分析画面へ移動します。")
 
         summaries = res_data.get("selected_races_summary", [])
-        sum_cols = st.columns(len(summaries) if summaries else 1)
         for idx, s in enumerate(summaries):
-            with sum_cols[idx % len(sum_cols)]:
-                badge = f"🔥 勝負R {idx+1}"
-                st.markdown(f"#### {badge}")
-                st.markdown(f"**{s.get('race_name')}**")
-                st.caption(f"信頼度: {s.get('confidence')} | 波乱度: {s.get('risk_level')}")
-                st.write(f"💡 {s.get('reason')}")
+            raw_r_name = str(s.get("race_name", "")).strip()
 
-        st.divider()
+            # 下書きリストと照合して正確なキーを取得（完全一致優先、なければ部分一致）
+            matched_draft_name = raw_r_name
+            if raw_r_name not in all_draft_list:
+                for d_item in all_draft_list:
+                    if raw_r_name in d_item or d_item in raw_r_name:
+                        matched_draft_name = d_item
+                        break
 
-        details = res_data.get("races_detail", [])
-        if details:
-            col_rename_map = {
-                "horse_num": "馬番",
-                "horse_name": "馬名",
-                "pop": "人気",
-                "pred_pop": "予想人気",
-                "total_score": "総合スコア",
-                "eval": "評価（S.A+.A.B+.B.C）",
-                "score_shubahyou": "出馬表点",
-                "score_kettou": "血統点",
-                "score_choukyou": "調教点",
-                "score_kin5so": "近5走点",
-                "score_tenkai": "展開点",
-                "score_baba": "馬場点",
-                "jiku": "軸（〇）",
-                "himo": "ヒモ（〇）",
-                "chu": "注（〇）",
-                "kiri": "切り（〇）",
-                "memo": "メモ",
-            }
+            with st.container(border=True):
+                c_info, c_btn = st.columns([3.2, 1.3])
+                with c_info:
+                    st.markdown(f"### 🔥 勝負R {idx+1}： `{raw_r_name}`")
+                    st.markdown(f"**軸信頼度：** `{s.get('confidence', '-')}` ｜ **波乱度：** `{s.get('risk_level', '-')}`")
+                    if s.get("target_horses"):
+                        st.markdown(f"🐎 **注目馬：** {s.get('target_horses')}")
+                    if s.get("key_point"):
+                        st.markdown(f"🎯 **狙い目：** {s.get('key_point')}")
+                    st.write(f"💡 **選出根拠：** {s.get('reason', '')}")
 
-            if "field_mode_saved_races" not in st.session_state:
-                st.session_state["field_mode_saved_races"] = set()
-
-            # 全5レース分のDataFrameを構築し、未保存のレースはまとめてDB保存
-            built_dfs = []
-            for idx, r_detail in enumerate(details):
-                h_list = r_detail.get("horses", [])
-                r_name_str = r_detail.get("race_name", f"R{idx+1}")
-                if h_list:
-                    df_r = pd.DataFrame(h_list).rename(columns=col_rename_map)
-                    if "予想人気" not in df_r.columns:
-                        df_r["予想人気"] = df_r["人気"] if "人気" in df_r.columns else ""
-                    if "総合スコアグラフ" not in df_r.columns and "総合スコア" in df_r.columns:
-                        df_r["総合スコアグラフ"] = df_r["総合スコア"].apply(
-                            lambda v: "■" * max(0, min(20, int(round(float(v) / 5.0)))) if pd.notna(v) and str(v).strip() != "" else ""
-                        )
-                    df_r["レース名"] = r_name_str
-                    df_r["信頼度"] = r_detail.get("confidence", "")
-                    df_r["波乱度"] = r_detail.get("risk_level", "")
-                    df_r["レース質展開予想"] = r_detail.get("race_quality_and_tenkai", "")
-                    raw_tickets = r_detail.get("recommended_tickets", [])
-                    formatted_tickets = []
-                    for t in raw_tickets:
-                        if isinstance(t, dict):
-                            t_type = t.get("type", "")
-                            t_comb = t.get("combination", "")
-                            t_pts = t.get("points", "")
-                            t_rsn = t.get("reason", "")
-                            pts_str = f"（{t_pts}）" if t_pts else ""
-                            rsn_str = f"：{t_rsn}" if t_rsn else ""
-                            formatted_tickets.append(f"【{t_type}】{t_comb}{pts_str}{rsn_str}")
-                        else:
-                            formatted_tickets.append(str(t))
-                    df_r["推奨買い目"] = json.dumps(formatted_tickets, ensure_ascii=False)
-
-                    if r_name_str not in st.session_state["field_mode_saved_races"]:
-                        save_to_db(df_r)
-                        st.session_state["field_mode_saved_races"].add(r_name_str)
-                    built_dfs.append((r_name_str, df_r))
-
-            if built_dfs:
-                # 同時描画によるボタンID重複を防ぐため、選択された1レースのみを描画
-                race_options = [f"🔥 勝負R{i+1}: {name}" for i, (name, _) in enumerate(built_dfs)]
-                selected_race_label = st.radio(
-                    "📌 詳細を表示する勝負レースを選択（切り替えて全5Rを確認できます）",
-                    options=race_options,
-                    horizontal=True,
-                    key="field_mode_active_race_selector"
-                )
-                selected_idx = race_options.index(selected_race_label)
-                _, target_df = built_dfs[selected_idx]
-                render_race_evaluation_view(target_df, is_viewer_mode=False, show_chat=True)
+                with c_btn:
+                    st.write("")
+                    st.write("")
+                    if st.button(
+                        "🔍 単発評価で\n精密解析する",
+                        key=f"jump_single_eval_btn_{idx}_{matched_draft_name}",
+                        use_container_width=True,
+                        type="primary"
+                    ):
+                        st.session_state["jump_to_single_eval"] = matched_draft_name
+                        st.rerun()
 
 
 # --------------------------------------------------
@@ -3302,7 +3255,13 @@ with head_col2:
         st.caption("🔑 st.secrets / APIキー自動ロード動作中")
         st.caption("📱 スマホ表示最適化済み")
 
-# メイン画面上部ナビゲーション
+# メイン画面上部ナビゲーション（現地厳選5Rからのワンクリック遷移フック付き）
+if st.session_state.get("jump_to_single_eval"):
+    _target_draft_r = st.session_state.pop("jump_to_single_eval")
+    st.session_state["main_nav_menu"] = "📋 レース分析・予想"
+    st.session_state["selected_draft_race"] = _target_draft_r
+    st.session_state["draft_race_select_box"] = _target_draft_r
+
 selected_menu = st.radio(
     "機能切り替えナビゲーション：",
     [
@@ -3317,6 +3276,7 @@ selected_menu = st.radio(
     ],
     horizontal=True,
     index=0,
+    key="main_nav_menu",
 )
 
 st.divider()
